@@ -138,3 +138,79 @@ class ProbeData:
 
     def total_point_count(self):
         return sum(len(s.points) for s in self.sides)
+
+    def side_stats(self):
+        """Return per-side statistics: Z min/max/avg/std, point count, XY path length."""
+        stats = []
+        for side in self.sides:
+            z = side.points[:, 2]
+            # XY path length (sum of euclidean distances between consecutive points)
+            diffs = np.diff(side.points[:, :2], axis=0)
+            path_len = float(np.sum(np.linalg.norm(diffs, axis=1)))
+            # Side span: distance from first to last point in XY
+            span = float(np.linalg.norm(
+                side.points[-1, :2] - side.points[0, :2]
+            ))
+            stats.append({
+                "name": side.name,
+                "count": len(side.points),
+                "z_min": float(z.min()),
+                "z_max": float(z.max()),
+                "z_avg": float(z.mean()),
+                "z_std": float(z.std()),
+                "path_length": path_len,
+                "span": span,
+            })
+        return stats
+
+    def plate_dimensions(self):
+        """Calculate plate dimensions and rotation angle.
+
+        Uses corner points (first point of each side) to determine
+        plate geometry. The plate may be rotated relative to machine axes.
+        """
+        if len(self.sides) < 2:
+            return None
+
+        # Corners = first point of each side
+        corners = []
+        for side in self.sides:
+            corners.append(side.points[0, :2].copy())
+
+        corners = np.array(corners)
+
+        # Side lengths between consecutive corners
+        n = len(corners)
+        side_lengths = []
+        for i in range(n):
+            j = (i + 1) % n
+            side_lengths.append(float(np.linalg.norm(corners[j] - corners[i])))
+
+        # Rotation angle: angle of first side (index 0 -> index 1) relative to X axis
+        if n >= 2:
+            vec = corners[1] - corners[0]
+            angle_rad = float(np.arctan2(vec[1], vec[0]))
+            angle_deg = float(np.degrees(angle_rad))
+        else:
+            angle_deg = 0.0
+
+        # For 4-sided plate: width = avg of sides 0,2; height = avg of sides 1,3
+        if n == 4:
+            width = (side_lengths[0] + side_lengths[2]) / 2.0
+            height = (side_lengths[1] + side_lengths[3]) / 2.0
+            diag1 = float(np.linalg.norm(corners[2] - corners[0]))
+            diag2 = float(np.linalg.norm(corners[3] - corners[1]))
+        else:
+            width = side_lengths[0] if side_lengths else 0
+            height = side_lengths[1] if len(side_lengths) > 1 else 0
+            diag1 = diag2 = 0
+
+        return {
+            "corners": corners,
+            "side_lengths": side_lengths,
+            "width": width,
+            "height": height,
+            "angle_deg": angle_deg,
+            "diagonal_1": diag1,
+            "diagonal_2": diag2,
+        }
