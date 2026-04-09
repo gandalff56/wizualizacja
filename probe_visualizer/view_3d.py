@@ -47,25 +47,11 @@ def _ev_pos(ev):
 
 
 class InteractiveGLWidget(gl.GLViewWidget):
-    """GLViewWidget with mouse tracking for hover and click.
+    """GLViewWidget with cursor polling for hover and double-click for select."""
 
-    Click = right mouse button (left is used by GLViewWidget for orbit).
-    Hover = any mouse move with tracking enabled.
-    """
-
-    hover_moved = pyqtSignal(object)
     point_clicked = pyqtSignal(object)
 
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.setMouseTracking(True)
-
-    def mouseMoveEvent(self, ev):
-        self.hover_moved.emit(_ev_pos(ev))
-        super().mouseMoveEvent(ev)
-
     def mouseDoubleClickEvent(self, ev):
-        """Double-click left button to select a point."""
         if ev.button() == Qt.LeftButton:
             self.point_clicked.emit(_ev_pos(ev))
         super().mouseDoubleClickEvent(ev)
@@ -77,7 +63,6 @@ class View3D(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.gl_widget = InteractiveGLWidget()
-        self.gl_widget.hover_moved.connect(self._on_mouse_move_raw)
         self.gl_widget.point_clicked.connect(self._on_click)
 
         # Tooltip
@@ -88,12 +73,13 @@ class View3D(QWidget):
         )
         self.tooltip_label.hide()
 
-        # Throttled hover timer (30fps max)
+        # Hover: poll cursor position every 50ms (mouseMoveEvent unreliable in QOpenGLWidget)
+        self._last_hover_x = -1
+        self._last_hover_y = -1
         self._hover_timer = QTimer()
-        self._hover_timer.setSingleShot(True)
-        self._hover_timer.setInterval(33)  # ~30fps
-        self._hover_timer.timeout.connect(self._on_hover_throttled)
-        self._pending_hover_pos = None
+        self._hover_timer.setInterval(50)
+        self._hover_timer.timeout.connect(self._poll_cursor)
+        self._hover_timer.start()
 
         # Z scale slider
         self.z_scale_slider = QSlider(Qt.Horizontal)
@@ -229,19 +215,31 @@ class View3D(QWidget):
 
     # === MOUSE EVENTS ===
 
-    def _on_mouse_move_raw(self, pos):
-        """Throttle hover events to max ~30fps."""
-        self._pending_hover_pos = pos
-        if not self._hover_timer.isActive():
-            self._hover_timer.start()
-
-    def _on_hover_throttled(self):
-        pos = self._pending_hover_pos
-        if pos is None or self.data is None:
-            self.tooltip_label.hide()
+    def _poll_cursor(self):
+        """Poll cursor position for hover tooltip (works even without mouse tracking)."""
+        if self.data is None or self._all_trans_flat is None:
+            if self.tooltip_label.isVisible():
+                self.tooltip_label.hide()
             return
 
-        result = self._find_nearest_point(pos)
+        from PyQt5.QtGui import QCursor
+        global_pos = QCursor.pos()
+        local_pos = self.gl_widget.mapFromGlobal(global_pos)
+        mx, my = local_pos.x(), local_pos.y()
+
+        # Check if cursor is inside the GL widget
+        if mx < 0 or my < 0 or mx >= self.gl_widget.width() or my >= self.gl_widget.height():
+            if self.tooltip_label.isVisible():
+                self.tooltip_label.hide()
+            return
+
+        # Skip if cursor hasn't moved
+        if mx == self._last_hover_x and my == self._last_hover_y:
+            return
+        self._last_hover_x = mx
+        self._last_hover_y = my
+
+        result = self._find_nearest_point(local_pos)
         if result is not None:
             _, _, side_name, orig_pt = result
             self.tooltip_label.setText(
@@ -251,7 +249,6 @@ class View3D(QWidget):
                 f"Z: {orig_pt[2]:.3f}"
             )
             w = self.gl_widget.width()
-            mx, my = pos.x(), pos.y()
             hint = self.tooltip_label.sizeHint()
             tx = min(mx + 15, w - hint.width() - 5)
             ty = max(my - hint.height() - 5, 5)
