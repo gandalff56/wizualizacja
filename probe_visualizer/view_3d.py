@@ -1,7 +1,7 @@
 import numpy as np
 from PyQt5.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QSlider
-from PyQt5.QtCore import Qt, QPoint
-from PyQt5.QtGui import QMatrix4x4, QVector3D, QVector4D, QCursor
+from PyQt5.QtCore import Qt, QPoint, pyqtSignal, QEvent
+from PyQt5.QtGui import QMatrix4x4, QVector4D
 
 import pyqtgraph.opengl as gl
 import matplotlib.cm as cm
@@ -17,6 +17,9 @@ def _hex_to_gl(hex_color, alpha=1.0):
 
 
 class View3D(QWidget):
+    # Signal: (side_index, point_index, side_name, x, y, z)
+    point_selected = pyqtSignal(int, int, str, float, float, float)
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.gl_widget = gl.GLViewWidget()
@@ -30,8 +33,9 @@ class View3D(QWidget):
         )
         self.tooltip_label.hide()
 
-        # Install event filter for mouse tracking on GL widget
+        # Install event filter for mouse tracking and clicks
         self.gl_widget.installEventFilter(self)
+        self._mouse_press_pos = None
 
         self.z_scale_slider = QSlider(Qt.Horizontal)
         self.z_scale_slider.setMinimum(1)
@@ -57,18 +61,40 @@ class View3D(QWidget):
         self.color_mode = "side"
         self._items = []
 
-        # For hover tooltip: store original and transformed points
-        self._original_points = []  # list of (side_name, np.ndarray shape (N,3))
-        self._transformed_points = []  # list of np.ndarray shape (N,3) in GL coords
+        # For hover/click: store original and transformed points
+        # Each entry: (side_index_in_data, side_name, orig_points, trans_points)
+        self._point_map = []
+
+        # Selected point highlight
+        self._selected_side_idx = -1
+        self._selected_pt_idx = -1
+        self._highlight_item = None
 
     def eventFilter(self, obj, event):
-        from PyQt5.QtCore import QEvent
-        if obj is self.gl_widget and event.type() == QEvent.MouseMove:
+        if obj is not self.gl_widget:
+            return super().eventFilter(obj, event)
+
+        if event.type() == QEvent.MouseMove:
             self._on_mouse_move(event.pos())
+        elif event.type() == QEvent.MouseButtonPress and event.button() == Qt.LeftButton:
+            self._mouse_press_pos = event.pos()
+        elif event.type() == QEvent.MouseButtonRelease and event.button() == Qt.LeftButton:
+            if self._mouse_press_pos is not None:
+                delta = event.pos() - self._mouse_press_pos
+                if abs(delta.x()) < 5 and abs(delta.y()) < 5:
+                    self._on_click(event.pos())
+            self._mouse_press_pos = None
+
         return super().eventFilter(obj, event)
 
+    def _get_matrices(self):
+        w = self.gl_widget.width()
+        h = self.gl_widget.height()
+        view_matrix = QMatrix4x4(np.array(self.gl_widget.viewMatrix().glData(), dtype=np.float32))
+        proj_matrix = QMatrix4x4(np.array(self.gl_widget.projectionMatrix().glData(), dtype=np.float32))
+        return view_matrix, proj_matrix, w, h
+
     def _project_point(self, pt_3d, view_matrix, proj_matrix, width, height):
-        """Project a 3D point to 2D screen coordinates."""
         v = QVector4D(pt_3d[0], pt_3d[1], pt_3d[2], 1.0)
         v = view_matrix * v
         v = proj_matrix * v
@@ -77,26 +103,18 @@ class View3D(QWidget):
         ndc_x = v.x() / v.w()
         ndc_y = v.y() / v.w()
         screen_x = (ndc_x + 1.0) * 0.5 * width
-        screen_y = (1.0 - ndc_y) * 0.5 * height  # flip Y
+        screen_y = (1.0 - ndc_y) * 0.5 * height
         return (screen_x, screen_y)
 
-    def _on_mouse_move(self, pos):
-        if self.data is None or not self._transformed_points:
-            self.tooltip_label.hide()
-            return
-
+    def _find_nearest_point(self, pos, max_dist=15.0):
+        """Find nearest point to screen position. Returns (side_idx, pt_idx, side_name, orig_pt) or None."""
         mx, my = pos.x(), pos.y()
-        w = self.gl_widget.width()
-        h = self.gl_widget.height()
+        view_matrix, proj_matrix, w, h = self._get_matrices()
 
-        view_matrix = QMatrix4x4(np.array(self.gl_widget.viewMatrix().glData(), dtype=np.float32))
-        proj_matrix = QMatrix4x4(np.array(self.gl_widget.projectionMatrix().glData(), dtype=np.float32))
+        best_dist = max_dist
+        best = None
 
-        best_dist = 15.0  # max pixel radius
-        best_orig = None
-        best_side = None
-
-        for (side_name, orig_pts), trans_pts in zip(self._original_points, self._transformed_points):
+        for side_data_idx, side_name, orig_pts, trans_pts in self._point_map:
             for j in range(len(trans_pts)):
                 screen = self._project_point(trans_pts[j], view_matrix, proj_matrix, w, h)
                 if screen is None:
@@ -106,17 +124,27 @@ class View3D(QWidget):
                 dist = (dx * dx + dy * dy) ** 0.5
                 if dist < best_dist:
                     best_dist = dist
-                    best_orig = orig_pts[j]
-                    best_side = side_name
+                    best = (side_data_idx, j, side_name, orig_pts[j])
 
-        if best_orig is not None:
+        return best
+
+    def _on_mouse_move(self, pos):
+        if self.data is None or not self._point_map:
+            self.tooltip_label.hide()
+            return
+
+        result = self._find_nearest_point(pos)
+
+        if result is not None:
+            _, _, side_name, orig_pt = result
             self.tooltip_label.setText(
-                f"{best_side}\n"
-                f"X: {best_orig[0]:.3f}\n"
-                f"Y: {best_orig[1]:.3f}\n"
-                f"Z: {best_orig[2]:.3f}"
+                f"{side_name}\n"
+                f"X: {orig_pt[0]:.3f}\n"
+                f"Y: {orig_pt[1]:.3f}\n"
+                f"Z: {orig_pt[2]:.3f}"
             )
-            # Position tooltip near cursor but inside widget
+            w = self.gl_widget.width()
+            mx, my = pos.x(), pos.y()
             tx = min(mx + 15, w - self.tooltip_label.sizeHint().width() - 5)
             ty = max(my - self.tooltip_label.sizeHint().height() - 5, 5)
             self.tooltip_label.move(tx, ty)
@@ -124,6 +152,52 @@ class View3D(QWidget):
             self.tooltip_label.show()
         else:
             self.tooltip_label.hide()
+
+    def _on_click(self, pos):
+        if self.data is None or not self._point_map:
+            return
+
+        result = self._find_nearest_point(pos)
+
+        if result is not None:
+            side_idx, pt_idx, side_name, orig_pt = result
+            self._selected_side_idx = side_idx
+            self._selected_pt_idx = pt_idx
+            self._update_highlight()
+            self.point_selected.emit(
+                side_idx, pt_idx, side_name,
+                float(orig_pt[0]), float(orig_pt[1]), float(orig_pt[2])
+            )
+
+    def _update_highlight(self):
+        if self._highlight_item is not None:
+            self.gl_widget.removeItem(self._highlight_item)
+            self._highlight_item = None
+
+        if self._selected_side_idx < 0 or self._selected_pt_idx < 0:
+            return
+
+        for side_data_idx, _, _, trans_pts in self._point_map:
+            if side_data_idx == self._selected_side_idx:
+                if self._selected_pt_idx < len(trans_pts):
+                    pt = trans_pts[self._selected_pt_idx:self._selected_pt_idx + 1]
+                    self._highlight_item = gl.GLScatterPlotItem(
+                        pos=pt,
+                        color=np.array([[1.0, 1.0, 1.0, 1.0]]),
+                        size=12.0, pxMode=True
+                    )
+                    self.gl_widget.addItem(self._highlight_item)
+                break
+
+    def update_selected_point(self, side_idx, pt_idx, x, y, z):
+        """Called when user edits point values - update data and redraw."""
+        if self.data is None:
+            return
+        self.data.sides[side_idx].points[pt_idx] = [x, y, z]
+        self._selected_side_idx = side_idx
+        self._selected_pt_idx = pt_idx
+        self._draw()
+        self._update_highlight()
 
     def _get_z_scale(self):
         return self.z_scale_slider.value() / 10.0
@@ -133,19 +207,24 @@ class View3D(QWidget):
         self.z_label.setText(f"Z scale: {scale:.1f}x")
         if self.data is not None:
             self._draw()
+            self._update_highlight()
 
     def update_plot(self, data, visible_sides, color_mode):
         self.data = data
         self.visible_sides = visible_sides
         self.color_mode = color_mode
+        self._selected_side_idx = -1
+        self._selected_pt_idx = -1
         self._draw()
 
     def _draw(self):
         for item in self._items:
             self.gl_widget.removeItem(item)
         self._items.clear()
-        self._original_points.clear()
-        self._transformed_points.clear()
+        self._point_map.clear()
+        if self._highlight_item is not None:
+            self.gl_widget.removeItem(self._highlight_item)
+            self._highlight_item = None
         self.tooltip_label.hide()
 
         if self.data is None:
@@ -176,9 +255,8 @@ class View3D(QWidget):
             pts[:, 1] -= center_y
             pts[:, 2] = (pts[:, 2] - center_z) * z_scale
 
-            # Store for hover lookup
-            self._original_points.append((side.name, side.points.copy()))
-            self._transformed_points.append(pts.copy())
+            # Store for hover/click lookup
+            self._point_map.append((i, side.name, side.points.copy(), pts.copy()))
 
             if self.color_mode == "side":
                 color = _hex_to_gl(get_color_for_side(side.name, i))

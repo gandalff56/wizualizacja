@@ -3,6 +3,7 @@ from PyQt5.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QStackedWidget,
     QComboBox, QCheckBox, QGroupBox, QPushButton, QFileDialog,
     QMessageBox, QStatusBar, QAction, QLabel, QScrollArea,
+    QDoubleSpinBox,
 )
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QKeySequence
@@ -21,6 +22,12 @@ class MainWindow(QMainWindow):
         self.data = None
         self.visible_sides = {}
         self.color_mode = "side"
+        self._current_path = None
+
+        # Selected point info
+        self._sel_side_idx = -1
+        self._sel_pt_idx = -1
+        self._editing = False  # prevent feedback loop
 
         self._setup_menu()
         self._setup_ui()
@@ -34,6 +41,16 @@ class MainWindow(QMainWindow):
         open_action.setShortcut(QKeySequence("Ctrl+O"))
         open_action.triggered.connect(self._open_file)
         file_menu.addAction(open_action)
+
+        save_action = QAction("&Save", self)
+        save_action.setShortcut(QKeySequence("Ctrl+S"))
+        save_action.triggered.connect(self._save_file)
+        file_menu.addAction(save_action)
+
+        save_as_action = QAction("Save &As...", self)
+        save_as_action.setShortcut(QKeySequence("Ctrl+Shift+S"))
+        save_as_action.triggered.connect(self._save_file_as)
+        file_menu.addAction(save_as_action)
 
         file_menu.addSeparator()
 
@@ -93,13 +110,74 @@ class MainWindow(QMainWindow):
 
         self.side_checks = {}
 
+        # Main content: views + edit panel
+        content_layout = QHBoxLayout()
+
         # Stacked views
         self.stack = QStackedWidget()
         self.view_2d = View2D()
         self.view_3d = View3D()
         self.stack.addWidget(self.view_2d)
         self.stack.addWidget(self.view_3d)
-        main_layout.addWidget(self.stack, stretch=1)
+        content_layout.addWidget(self.stack, stretch=1)
+
+        # Connect point selection signal
+        self.view_3d.point_selected.connect(self._on_point_selected)
+
+        # Edit panel (right side)
+        self.edit_panel = QGroupBox("Edit Point")
+        edit_layout = QVBoxLayout(self.edit_panel)
+
+        self.edit_info_label = QLabel("Click a point in 3D view\nto select it")
+        self.edit_info_label.setAlignment(Qt.AlignCenter)
+        edit_layout.addWidget(self.edit_info_label)
+
+        # X spinbox
+        x_row = QHBoxLayout()
+        x_row.addWidget(QLabel("X:"))
+        self.spin_x = QDoubleSpinBox()
+        self.spin_x.setDecimals(3)
+        self.spin_x.setRange(-999999, 999999)
+        self.spin_x.valueChanged.connect(self._on_spin_changed)
+        x_row.addWidget(self.spin_x)
+        edit_layout.addLayout(x_row)
+
+        # Y spinbox
+        y_row = QHBoxLayout()
+        y_row.addWidget(QLabel("Y:"))
+        self.spin_y = QDoubleSpinBox()
+        self.spin_y.setDecimals(3)
+        self.spin_y.setRange(-999999, 999999)
+        self.spin_y.valueChanged.connect(self._on_spin_changed)
+        y_row.addWidget(self.spin_y)
+        edit_layout.addLayout(y_row)
+
+        # Z spinbox
+        z_row = QHBoxLayout()
+        z_row.addWidget(QLabel("Z:"))
+        self.spin_z = QDoubleSpinBox()
+        self.spin_z.setDecimals(3)
+        self.spin_z.setRange(-999999, 999999)
+        self.spin_z.valueChanged.connect(self._on_spin_changed)
+        z_row.addWidget(self.spin_z)
+        edit_layout.addLayout(z_row)
+
+        # Save button
+        save_btn = QPushButton("Save (Ctrl+S)")
+        save_btn.clicked.connect(self._save_file)
+        edit_layout.addWidget(save_btn)
+
+        save_as_btn = QPushButton("Save As...")
+        save_as_btn.clicked.connect(self._save_file_as)
+        edit_layout.addWidget(save_as_btn)
+
+        edit_layout.addStretch()
+
+        self.edit_panel.setFixedWidth(200)
+        self.edit_panel.setEnabled(False)
+        content_layout.addWidget(self.edit_panel)
+
+        main_layout.addLayout(content_layout, stretch=1)
 
     def _setup_statusbar(self):
         self.status_bar = QStatusBar()
@@ -107,7 +185,6 @@ class MainWindow(QMainWindow):
         self.status_bar.showMessage("Ready - open a JSON file to start")
 
     def _rebuild_side_checks(self):
-        # Clear old checkboxes
         for cb in self.side_checks.values():
             self.sides_layout.removeWidget(cb)
             cb.deleteLater()
@@ -139,6 +216,7 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "Error", f"Failed to load file:\n{e}")
             return
 
+        self._current_path = path
         filename = os.path.basename(path)
         n_sides = len(self.data.sides)
         n_pts = self.data.total_point_count()
@@ -150,8 +228,68 @@ class MainWindow(QMainWindow):
             f"{n_pts} points | Z: {z_min:.1f} - {z_max:.1f}"
         )
 
+        self._sel_side_idx = -1
+        self._sel_pt_idx = -1
+        self.edit_panel.setEnabled(False)
+        self.edit_info_label.setText("Click a point in 3D view\nto select it")
+
         self._rebuild_side_checks()
         self._refresh_views()
+
+    def _save_file(self):
+        if self.data is None:
+            return
+        try:
+            self.data.save_to_json_file()
+            self.status_bar.showMessage(f"Saved to {os.path.basename(self.data.source_path)}")
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to save:\n{e}")
+
+    def _save_file_as(self):
+        if self.data is None:
+            return
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Save Probe Data As", "",
+            "JSON Files (*.json);;All Files (*)"
+        )
+        if not path:
+            return
+        try:
+            self.data.save_to_json_file(path)
+            self._current_path = path
+            self.setWindowTitle(f"Probe Data Visualizer - {os.path.basename(path)}")
+            self.status_bar.showMessage(f"Saved to {os.path.basename(path)}")
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to save:\n{e}")
+
+    def _on_point_selected(self, side_idx, pt_idx, side_name, x, y, z):
+        self._sel_side_idx = side_idx
+        self._sel_pt_idx = pt_idx
+        self.edit_panel.setEnabled(True)
+        self.edit_info_label.setText(f"{side_name}\nPoint #{pt_idx + 1}")
+
+        self._editing = True
+        self.spin_x.setValue(x)
+        self.spin_y.setValue(y)
+        self.spin_z.setValue(z)
+        self._editing = False
+
+    def _on_spin_changed(self):
+        if self._editing or self._sel_side_idx < 0 or self.data is None:
+            return
+
+        x = self.spin_x.value()
+        y = self.spin_y.value()
+        z = self.spin_z.value()
+
+        # Update data model
+        self.data.sides[self._sel_side_idx].points[self._sel_pt_idx] = [x, y, z]
+
+        # Update 3D view in real-time
+        self.view_3d.update_selected_point(self._sel_side_idx, self._sel_pt_idx, x, y, z)
+
+        # Update 2D view too
+        self.view_2d.update_plot(self.data, self.visible_sides, self.color_mode)
 
     def _on_view_changed(self, index):
         self.stack.setCurrentIndex(index)
