@@ -86,7 +86,7 @@ class View3D(QWidget):
         # Z scale slider
         self.z_scale_slider = QSlider(Qt.Horizontal)
         self.z_scale_slider.setMinimum(1)
-        self.z_scale_slider.setMaximum(200)
+        self.z_scale_slider.setMaximum(400)
         self.z_scale_slider.setValue(10)
         self.z_scale_slider.valueChanged.connect(self._on_z_scale_changed)
         self.z_label = QLabel("1.0x")
