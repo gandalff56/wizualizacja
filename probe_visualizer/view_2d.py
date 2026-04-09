@@ -5,7 +5,7 @@ from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg, NavigationTool
 import matplotlib.cm as cm
 import matplotlib.colors as mcolors
 
-from probe_visualizer.colors import SIDE_COLORS, z_to_rgba
+from probe_visualizer.colors import get_color_for_side
 
 
 class View2D(QWidget):
@@ -41,7 +41,7 @@ class View2D(QWidget):
         all_pts = self.data.all_points()
         z_min, z_max = self.data.z_range()
 
-        for side in self.data.sides:
+        for i, side in enumerate(self.data.sides):
             if not self.visible_sides.get(side.name, True):
                 continue
 
@@ -50,7 +50,7 @@ class View2D(QWidget):
             z = side.points[:, 2]
 
             if self.color_mode == "side":
-                color = SIDE_COLORS.get(side.name, "#888888")
+                color = get_color_for_side(side.name, i)
                 ax.plot(x, y, "-", color=color, linewidth=1.5, label=side.name)
                 ax.scatter(x, y, c=color, s=8, zorder=5)
             else:
@@ -66,7 +66,9 @@ class View2D(QWidget):
                 sm.set_array([])
                 self.figure.colorbar(sm, ax=ax, label="Z [mm]", shrink=0.8)
         else:
-            ax.legend(loc="best", fontsize=9)
+            n_sides = sum(1 for s in self.data.sides if self.visible_sides.get(s.name, True))
+            if n_sides <= 20:
+                ax.legend(loc="best", fontsize=8)
 
         ax.set_xlabel("X [mm]")
         ax.set_ylabel("Y [mm]")

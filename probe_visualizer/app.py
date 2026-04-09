@@ -2,13 +2,12 @@ import os
 from PyQt5.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QStackedWidget,
     QComboBox, QCheckBox, QGroupBox, QPushButton, QFileDialog,
-    QMessageBox, QStatusBar, QAction, QLabel,
+    QMessageBox, QStatusBar, QAction, QLabel, QScrollArea,
 )
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QKeySequence
 
 from probe_visualizer.data_loader import ProbeData
-from probe_visualizer.colors import SIDE_COLORS, SIDE_ORDER
 from probe_visualizer.view_2d import View2D
 from probe_visualizer.view_3d import View3D
 
@@ -20,7 +19,7 @@ class MainWindow(QMainWindow):
         self.resize(1200, 800)
 
         self.data = None
-        self.visible_sides = {name: True for name in SIDE_ORDER}
+        self.visible_sides = {}
         self.color_mode = "side"
 
         self._setup_menu()
@@ -68,21 +67,31 @@ class MainWindow(QMainWindow):
         self.color_combo.currentIndexChanged.connect(self._on_color_changed)
         toolbar.addWidget(self.color_combo)
 
-        # Side checkboxes
-        sides_group = QGroupBox("Sides")
-        sides_layout = QHBoxLayout(sides_group)
-        sides_layout.setContentsMargins(6, 2, 6, 2)
-        self.side_checks = {}
-        for name in SIDE_ORDER:
-            cb = QCheckBox(name)
-            cb.setChecked(True)
-            cb.stateChanged.connect(self._on_side_toggled)
-            sides_layout.addWidget(cb)
-            self.side_checks[name] = cb
-        toolbar.addWidget(sides_group)
+        # All/None buttons
+        all_btn = QPushButton("All")
+        all_btn.setFixedWidth(40)
+        all_btn.clicked.connect(self._select_all_sides)
+        none_btn = QPushButton("None")
+        none_btn.setFixedWidth(45)
+        none_btn.clicked.connect(self._select_no_sides)
+        toolbar.addWidget(all_btn)
+        toolbar.addWidget(none_btn)
 
         toolbar.addStretch()
         main_layout.addLayout(toolbar)
+
+        # Dynamic side checkboxes in a scrollable area
+        self.sides_group = QGroupBox("Sides / Sessions")
+        self.sides_layout = QHBoxLayout(self.sides_group)
+        self.sides_layout.setContentsMargins(6, 2, 6, 2)
+
+        scroll = QScrollArea()
+        scroll.setWidget(self.sides_group)
+        scroll.setWidgetResizable(True)
+        scroll.setMaximumHeight(60)
+        main_layout.addWidget(scroll)
+
+        self.side_checks = {}
 
         # Stacked views
         self.stack = QStackedWidget()
@@ -96,6 +105,25 @@ class MainWindow(QMainWindow):
         self.status_bar = QStatusBar()
         self.setStatusBar(self.status_bar)
         self.status_bar.showMessage("Ready - open a JSON file to start")
+
+    def _rebuild_side_checks(self):
+        # Clear old checkboxes
+        for cb in self.side_checks.values():
+            self.sides_layout.removeWidget(cb)
+            cb.deleteLater()
+        self.side_checks.clear()
+        self.visible_sides.clear()
+
+        if self.data is None:
+            return
+
+        for side in self.data.sides:
+            cb = QCheckBox(side.name)
+            cb.setChecked(True)
+            cb.stateChanged.connect(self._on_side_toggled)
+            self.sides_layout.addWidget(cb)
+            self.side_checks[side.name] = cb
+            self.visible_sides[side.name] = True
 
     def _open_file(self):
         path, _ = QFileDialog.getOpenFileName(
@@ -115,20 +143,14 @@ class MainWindow(QMainWindow):
         n_sides = len(self.data.sides)
         n_pts = self.data.total_point_count()
         z_min, z_max = self.data.z_range()
+        fmt = self.data.format_name
         self.setWindowTitle(f"Probe Data Visualizer - {filename}")
         self.status_bar.showMessage(
-            f"{filename} | {n_sides} sides | {n_pts} points | "
-            f"Z range: {z_min:.1f} - {z_max:.1f}"
+            f"{filename} | Format: {fmt} | {n_sides} groups | "
+            f"{n_pts} points | Z: {z_min:.1f} - {z_max:.1f}"
         )
 
-        # Update side checkboxes for sides present in file
-        known = {s.name for s in self.data.sides}
-        for name, cb in self.side_checks.items():
-            cb.setEnabled(name in known)
-            if name in known:
-                cb.setChecked(True)
-                self.visible_sides[name] = True
-
+        self._rebuild_side_checks()
         self._refresh_views()
 
     def _on_view_changed(self, index):
@@ -142,6 +164,14 @@ class MainWindow(QMainWindow):
         for name, cb in self.side_checks.items():
             self.visible_sides[name] = cb.isChecked()
         self._refresh_views()
+
+    def _select_all_sides(self):
+        for cb in self.side_checks.values():
+            cb.setChecked(True)
+
+    def _select_no_sides(self):
+        for cb in self.side_checks.values():
+            cb.setChecked(False)
 
     def _refresh_views(self):
         if self.data is None:

@@ -5,7 +5,7 @@ from PyQt5.QtCore import Qt
 import pyqtgraph.opengl as gl
 import matplotlib.cm as cm
 
-from probe_visualizer.colors import SIDE_COLORS
+from probe_visualizer.colors import get_color_for_side
 
 
 def _hex_to_gl(hex_color, alpha=1.0):
@@ -83,7 +83,7 @@ class View3D(QWidget):
 
         cmap = cm.get_cmap("viridis")
 
-        for side in self.data.sides:
+        for i, side in enumerate(self.data.sides):
             if not self.visible_sides.get(side.name, True):
                 continue
 
@@ -93,7 +93,7 @@ class View3D(QWidget):
             pts[:, 2] = (pts[:, 2] - center_z) * z_scale
 
             if self.color_mode == "side":
-                color = _hex_to_gl(SIDE_COLORS.get(side.name, "#888888"))
+                color = _hex_to_gl(get_color_for_side(side.name, i))
                 line = gl.GLLinePlotItem(
                     pos=pts, color=color, width=2.0, antialias=True
                 )

@@ -8,15 +8,19 @@ SIDE_COLORS = {
     "Top": "#f39c12",
 }
 
-SIDE_ORDER = ["Left", "Bottom", "Right", "Top"]
+# Extended palette for sessions in Raw format
+_EXTRA_COLORS = [
+    "#e74c3c", "#3498db", "#2ecc71", "#f39c12", "#9b59b6",
+    "#1abc9c", "#e67e22", "#34495e", "#e91e63", "#00bcd4",
+    "#8bc34a", "#ff5722", "#607d8b", "#795548", "#673ab7",
+    "#009688", "#ff9800", "#03a9f4", "#cddc39", "#f44336",
+]
 
 
-def side_color_rgba(side_name):
-    hex_color = SIDE_COLORS.get(side_name, "#888888")
-    r = int(hex_color[1:3], 16) / 255.0
-    g = int(hex_color[3:5], 16) / 255.0
-    b = int(hex_color[5:7], 16) / 255.0
-    return (r, g, b, 1.0)
+def get_color_for_side(name, index=0):
+    if name in SIDE_COLORS:
+        return SIDE_COLORS[name]
+    return _EXTRA_COLORS[index % len(_EXTRA_COLORS)]
 
 
 def z_to_rgba(z_values, cmap_name="viridis"):
