@@ -441,7 +441,10 @@ class View3D(QWidget):
         z_scale = self.z_scale_slider.value() / 10.0
         pt_size = self.pt_size_slider.value()
         show_arrows = self.arrows_check.isChecked()
-        show_surface = self.surface_check.isChecked() and _get_delaunay() is not None
+        show_surface = self.surface_check.isChecked()
+        if show_surface and _get_delaunay() is None:
+            show_surface = False
+            self.surface_check.setChecked(False)
         z_range = z_max - z_min if z_max - z_min > 1e-9 else 1.0
         cmap = _get_cmap()
 
@@ -531,7 +534,7 @@ class View3D(QWidget):
         self.gl_widget.addItem(item)
 
     def _draw_arrows_batched(self, pts):
-        """Draw 2 direction arrows per side: at 1/3 and 2/3 of the path."""
+        """Draw 1 direction arrow per side at the midpoint of the path."""
         n = len(pts)
         if n < 3:
             return
@@ -541,32 +544,29 @@ class View3D(QWidget):
             pts[:, 1].max() - pts[:, 1].min(),
             1.0,
         )
-        arrow_len = span * 0.03
+        arrow_len = span * 0.04
 
-        lines = []
-        for frac in (0.33, 0.66):
-            j = int(frac * (n - 1))
-            j = max(0, min(j, n - 2))
-            p0 = pts[j]
-            p1 = pts[j + 1]
-            d = p1 - p0
-            length = np.linalg.norm(d)
-            if length < 1e-10:
-                continue
-            d = d / length
-            tip = p0 + d * arrow_len * 3
-            perp = np.array([-d[1], d[0], 0.0])
-            hs = arrow_len * 1.5
-            h1 = tip - d * hs + perp * hs * 0.5
-            h2 = tip - d * hs - perp * hs * 0.5
-            lines.extend([p0, tip, h1, tip, h2, tip])
+        j = n // 2
+        j = max(0, min(j, n - 2))
+        p0 = pts[j]
+        p1 = pts[j + 1]
+        d = p1 - p0
+        length = np.linalg.norm(d)
+        if length < 1e-10:
+            return
+        d = d / length
+        tip = p0 + d * arrow_len * 3
+        perp = np.array([-d[1], d[0], 0.0])
+        hs = arrow_len * 1.5
+        h1 = tip - d * hs + perp * hs * 0.5
+        h2 = tip - d * hs - perp * hs * 0.5
 
-        if lines:
-            self._add_item(gl.GLLinePlotItem(
-                pos=np.array(lines),
-                color=(1.0, 1.0, 1.0, 0.8),
-                width=2.0, antialias=True, mode="lines",
-            ))
+        lines = np.array([p0, tip, h1, tip, h2, tip])
+        self._add_item(gl.GLLinePlotItem(
+            pos=lines,
+            color=(1.0, 1.0, 1.0, 0.8),
+            width=2.0, antialias=True, mode="lines",
+        ))
 
     def _draw_surface_cached(self, combined, z_min, z_max, z_scale, cz, cmap):
         """Draw mesh using cached Delaunay faces."""
