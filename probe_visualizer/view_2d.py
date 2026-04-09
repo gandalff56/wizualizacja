@@ -1,5 +1,6 @@
 import numpy as np
 from PyQt5.QtWidgets import QWidget, QVBoxLayout
+from PyQt5.QtCore import QTimer
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg, NavigationToolbar2QT
 import matplotlib.cm as cm
@@ -24,11 +25,20 @@ class View2D(QWidget):
         self.visible_sides = {}
         self.color_mode = "side"
 
+        # Debounce timer for rapid updates (e.g. spinbox editing)
+        self._draw_timer = QTimer()
+        self._draw_timer.setSingleShot(True)
+        self._draw_timer.setInterval(50)  # 50ms debounce
+        self._draw_timer.timeout.connect(self._draw)
+        self._needs_draw = False
+
     def update_plot(self, data, visible_sides, color_mode):
         self.data = data
         self.visible_sides = visible_sides
         self.color_mode = color_mode
-        self._draw()
+        # Debounce: if called rapidly, only draw once
+        if not self._draw_timer.isActive():
+            self._draw_timer.start()
 
     def _draw(self):
         self.figure.clear()
@@ -37,8 +47,6 @@ class View2D(QWidget):
             return
 
         ax = self.figure.add_subplot(111)
-
-        all_pts = self.data.all_points()
         z_min, z_max = self.data.z_range()
 
         for i, side in enumerate(self.data.sides):
@@ -56,17 +64,22 @@ class View2D(QWidget):
             else:
                 ax.plot(x, y, "-", color="#cccccc", linewidth=0.8)
                 norm = mcolors.Normalize(vmin=z_min, vmax=z_max)
-                sc = ax.scatter(x, y, c=z, cmap="viridis", norm=norm, s=12, zorder=5)
+                ax.scatter(x, y, c=z, cmap="viridis", norm=norm, s=12, zorder=5)
 
         if self.color_mode == "z":
-            visible_any = any(self.visible_sides.get(s.name, True) for s in self.data.sides)
+            visible_any = any(
+                self.visible_sides.get(s.name, True) for s in self.data.sides
+            )
             if visible_any:
                 norm = mcolors.Normalize(vmin=z_min, vmax=z_max)
                 sm = cm.ScalarMappable(cmap="viridis", norm=norm)
                 sm.set_array([])
                 self.figure.colorbar(sm, ax=ax, label="Z [mm]", shrink=0.8)
         else:
-            n_sides = sum(1 for s in self.data.sides if self.visible_sides.get(s.name, True))
+            n_sides = sum(
+                1 for s in self.data.sides
+                if self.visible_sides.get(s.name, True)
+            )
             if n_sides <= 20:
                 ax.legend(loc="best", fontsize=8)
 
