@@ -1,0 +1,676 @@
+{
+  "ProbeDataSessionList": [
+    {
+      "AcquiringTime": "2026-02-11T12:09:14.7660623+01:00",
+      "ProgramLineNumber": 2,
+      "ProbeDataPoints": [
+        {
+          "X": 14111.055,
+          "Y": 1696.371,
+          "Z": 246.0,
+          "AL": 0.0,
+          "LaserData1": 126.245,
+          "LaserData2": 0.0,
+          "LaserData3": 0.0,
+          "LaserData4": 0.0
+        },
+        {
+          "X": 14105.373,
+          "Y": 1794.14,
+          "Z": 246.0,
+          "AL": 0.0,
+          "LaserData1": 126.907,
+          "LaserData2": 0.0,
+          "LaserData3": 0.0,
+          "LaserData4": 0.0
+        },
+        {
+          "X": 14099.691,
+          "Y": 1891.909,
+          "Z": 246.0,
+          "AL": 0.0,
+          "LaserData1": 127.396,
+          "LaserData2": 0.0,
+          "LaserData3": 0.0,
+          "LaserData4": 0.0
+        },
+        {
+          "X": 14094.009,
+          "Y": 1989.678,
+          "Z": 246.0,
+          "AL": 0.0,
+          "LaserData1": 127.58,
+          "LaserData2": 0.0,
+          "LaserData3": 0.0,
+          "LaserData4": 0.0
+        },
+        {
+          "X": 14088.327,
+          "Y": 2087.447,
+          "Z": 246.0,
+          "AL": 0.0,
+          "LaserData1": 128.126,
+          "LaserData2": 0.0,
+          "LaserData3": 0.0,
+          "LaserData4": 0.0
+        },
+        {
+          "X": 14082.645,
+          "Y": 2185.216,
+          "Z": 246.0,
+          "AL": 0.0,
+          "LaserData1": 128.497,
+          "LaserData2": 0.0,
+          "LaserData3": 0.0,
+          "LaserData4": 0.0
+        },
+        {
+          "X": 14076.963,
+          "Y": 2282.985,
+          "Z": 246.0,
+          "AL": 0.0,
+          "LaserData1": 128.979,
+          "LaserData2": 0.0,
+          "LaserData3": 0.0,
+          "LaserData4": 0.0
+        },
+        {
+          "X": 14071.281,
+          "Y": 2380.754,
+          "Z": 246.0,
+          "AL": 0.0,
+          "LaserData1": 129.252,
+          "LaserData2": 0.0,
+          "LaserData3": 0.0,
+          "LaserData4": 0.0
+        },
+        {
+          "X": 14065.599,
+          "Y": 2478.523,
+          "Z": 246.0,
+          "AL": 0.0,
+          "LaserData1": 129.613,
+          "LaserData2": 0.0,
+          "LaserData3": 0.0,
+          "LaserData4": 0.0
+        },
+        {
+          "X": 14059.917,
+          "Y": 2576.292,
+          "Z": 246.0,
+          "AL": 0.0,
+          "LaserData1": 129.92,
+          "LaserData2": 0.0,
+          "LaserData3": 0.0,
+          "LaserData4": 0.0
+        },
+        {
+          "X": 14054.235,
+          "Y": 2674.061,
+          "Z": 246.0,
+          "AL": 0.0,
+          "LaserData1": 130.199,
+          "LaserData2": 0.0,
+          "LaserData3": 0.0,
+          "LaserData4": 0.0
+        },
+        {
+          "X": 14048.553,
+          "Y": 2771.83,
+          "Z": 246.0,
+          "AL": 0.0,
+          "LaserData1": 130.484,
+          "LaserData2": 0.0,
+          "LaserData3": 0.0,
+          "LaserData4": 0.0
+        },
+        {
+          "X": 14042.871,
+          "Y": 2869.599,
+          "Z": 246.0,
+          "AL": 0.0,
+          "LaserData1": 130.45,
+          "LaserData2": 0.0,
+          "LaserData3": 0.0,
+          "LaserData4": 0.0
+        },
+        {
+          "X": 14037.189,
+          "Y": 2967.368,
+          "Z": 246.0,
+          "AL": 0.0,
+          "LaserData1": 130.894,
+          "LaserData2": 0.0,
+          "LaserData3": 0.0,
+          "LaserData4": 0.0
+        },
+        {
+          "X": 14031.507,
+          "Y": 3065.137,
+          "Z": 246.0,
+          "AL": 0.0,
+          "LaserData1": 130.979,
+          "LaserData2": 0.0,
+          "LaserData3": 0.0,
+          "LaserData4": 0.0
+        },
+        {
+          "X": 14025.825,
+          "Y": 3162.906,
+          "Z": 246.0,
+          "AL": 0.0,
+          "LaserData1": 131.237,
+          "LaserData2": 0.0,
+          "LaserData3": 0.0,
+          "LaserData4": 0.0
+        },
+        {
+          "X": 14020.143,
+          "Y": 3260.675,
+          "Z": 246.0,
+          "AL": 0.0,
+          "LaserData1": 131.308,
+          "LaserData2": 0.0,
+          "LaserData3": 0.0,
+          "LaserData4": 0.0
+        },
+        {
+          "X": 14014.461,
+          "Y": 3358.444,
+          "Z": 246.0,
+          "AL": 0.0,
+          "LaserData1": 131.293,
+          "LaserData2": 0.0,
+          "LaserData3": 0.0,
+          "LaserData4": 0.0
+        },
+        {
+          "X": 14008.779,
+          "Y": 3456.213,
+          "Z": 246.0,
+          "AL": 0.0,
+          "LaserData1": 131.52,
+          "LaserData2": 0.0,
+          "LaserData3": 0.0,
+          "LaserData4": 0.0
+        },
+        {
+          "X": 14003.097,
+          "Y": 3553.982,
+          "Z": 246.0,
+          "AL": 0.0,
+          "LaserData1": 131.83,
+          "LaserData2": 0.0,
+          "LaserData3": 0.0,
+          "LaserData4": 0.0
+        },
+        {
+          "X": 13997.415,
+          "Y": 3651.751,
+          "Z": 246.0,
+          "AL": 0.0,
+          "LaserData1": 131.355,
+          "LaserData2": 0.0,
+          "LaserData3": 0.0,
+          "LaserData4": 0.0
+        },
+        {
+          "X": 13991.733,
+          "Y": 3749.52,
+          "Z": 246.0,
+          "AL": 0.0,
+          "LaserData1": 131.322,
+          "LaserData2": 0.0,
+          "LaserData3": 0.0,
+          "LaserData4": 0.0
+        },
+        {
+          "X": 13986.051,
+          "Y": 3847.289,
+          "Z": 246.0,
+          "AL": 0.0,
+          "LaserData1": 130.949,
+          "LaserData2": 0.0,
+          "LaserData3": 0.0,
+          "LaserData4": 0.0
+        },
+        {
+          "X": 13980.369,
+          "Y": 3945.058,
+          "Z": 246.0,
+          "AL": 0.0,
+          "LaserData1": 130.977,
+          "LaserData2": 0.0,
+          "LaserData3": 0.0,
+          "LaserData4": 0.0
+        },
+        {
+          "X": 13974.687,
+          "Y": 4042.827,
+          "Z": 246.0,
+          "AL": 0.0,
+          "LaserData1": 130.812,
+          "LaserData2": 0.0,
+          "LaserData3": 0.0,
+          "LaserData4": 0.0
+        },
+        {
+          "X": 13969.005,
+          "Y": 4140.596,
+          "Z": 246.0,
+          "AL": 0.0,
+          "LaserData1": 130.751,
+          "LaserData2": 0.0,
+          "LaserData3": 0.0,
+          "LaserData4": 0.0
+        },
+        {
+          "X": 13963.323,
+          "Y": 4238.365,
+          "Z": 246.0,
+          "AL": 0.0,
+          "LaserData1": 130.52,
+          "LaserData2": 0.0,
+          "LaserData3": 0.0,
+          "LaserData4": 0.0
+        },
+        {
+          "X": 13957.641,
+          "Y": 4336.134,
+          "Z": 246.0,
+          "AL": 0.0,
+          "LaserData1": 130.54,
+          "LaserData2": 0.0,
+          "LaserData3": 0.0,
+          "LaserData4": 0.0
+        },
+        {
+          "X": 13951.959,
+          "Y": 4433.903,
+          "Z": 246.0,
+          "AL": 0.0,
+          "LaserData1": 130.146,
+          "LaserData2": 0.0,
+          "LaserData3": 0.0,
+          "LaserData4": 0.0
+        },
+        {
+          "X": 13946.277,
+          "Y": 4531.672,
+          "Z": 246.0,
+          "AL": 0.0,
+          "LaserData1": 130.218,
+          "LaserData2": 0.0,
+          "LaserData3": 0.0,
+          "LaserData4": 0.0
+        },
+        {
+          "X": 13940.595,
+          "Y": 4629.441,
+          "Z": 246.0,
+          "AL": 0.0,
+          "LaserData1": 129.938,
+          "LaserData2": 0.0,
+          "LaserData3": 0.0,
+          "LaserData4": 0.0
+        },
+        {
+          "X": 13934.913,
+          "Y": 4727.21,
+          "Z": 246.0,
+          "AL": 0.0,
+          "LaserData1": 129.697,
+          "LaserData2": 0.0,
+          "LaserData3": 0.0,
+          "LaserData4": 0.0
+        },
+        {
+          "X": 13929.231,
+          "Y": 4824.979,
+          "Z": 246.0,
+          "AL": 0.0,
+          "LaserData1": 129.234,
+          "LaserData2": 0.0,
+          "LaserData3": 0.0,
+          "LaserData4": 0.0
+        }
+      ]
+    },
+    {
+      "AcquiringTime": "2026-02-11T12:11:05.707376+01:00",
+      "ProgramLineNumber": 3,
+      "ProbeDataPoints": [
+        {
+          "X": 22579.549,
+          "Y": 1702.626,
+          "Z": 246.0,
+          "AL": 0.0,
+          "LaserData1": 121.977,
+          "LaserData2": 0.0,
+          "LaserData3": 0.0,
+          "LaserData4": 0.0
+        },
+        {
+          "X": 22584.643,
+          "Y": 1800.515,
+          "Z": 246.0,
+          "AL": 0.0,
+          "LaserData1": 122.621,
+          "LaserData2": 0.0,
+          "LaserData3": 0.0,
+          "LaserData4": 0.0
+        },
+        {
+          "X": 22589.736,
+          "Y": 1898.404,
+          "Z": 246.0,
+          "AL": 0.0,
+          "LaserData1": 123.269,
+          "LaserData2": 0.0,
+          "LaserData3": 0.0,
+          "LaserData4": 0.0
+        },
+        {
+          "X": 22594.832,
+          "Y": 1996.293,
+          "Z": 246.0,
+          "AL": 0.0,
+          "LaserData1": 123.659,
+          "LaserData2": 0.0,
+          "LaserData3": 0.0,
+          "LaserData4": 0.0
+        },
+        {
+          "X": 22599.928,
+          "Y": 2094.182,
+          "Z": 246.0,
+          "AL": 0.0,
+          "LaserData1": 124.078,
+          "LaserData2": 0.0,
+          "LaserData3": 0.0,
+          "LaserData4": 0.0
+        },
+        {
+          "X": 22605.021,
+          "Y": 2192.071,
+          "Z": 246.0,
+          "AL": 0.0,
+          "LaserData1": 124.5,
+          "LaserData2": 0.0,
+          "LaserData3": 0.0,
+          "LaserData4": 0.0
+        },
+        {
+          "X": 22610.115,
+          "Y": 2289.96,
+          "Z": 246.0,
+          "AL": 0.0,
+          "LaserData1": 125.07,
+          "LaserData2": 0.0,
+          "LaserData3": 0.0,
+          "LaserData4": 0.0
+        },
+        {
+          "X": 22615.213,
+          "Y": 2387.849,
+          "Z": 246.0,
+          "AL": 0.0,
+          "LaserData1": 125.492,
+          "LaserData2": 0.0,
+          "LaserData3": 0.0,
+          "LaserData4": 0.0
+        },
+        {
+          "X": 22620.309,
+          "Y": 2485.738,
+          "Z": 246.0,
+          "AL": 0.0,
+          "LaserData1": 125.75,
+          "LaserData2": 0.0,
+          "LaserData3": 0.0,
+          "LaserData4": 0.0
+        },
+        {
+          "X": 22625.402,
+          "Y": 2583.627,
+          "Z": 246.0,
+          "AL": 0.0,
+          "LaserData1": 126.1,
+          "LaserData2": 0.0,
+          "LaserData3": 0.0,
+          "LaserData4": 0.0
+        },
+        {
+          "X": 22630.496,
+          "Y": 2681.516,
+          "Z": 246.0,
+          "AL": 0.0,
+          "LaserData1": 126.43,
+          "LaserData2": 0.0,
+          "LaserData3": 0.0,
+          "LaserData4": 0.0
+        },
+        {
+          "X": 22635.592,
+          "Y": 2779.405,
+          "Z": 246.0,
+          "AL": 0.0,
+          "LaserData1": 126.824,
+          "LaserData2": 0.0,
+          "LaserData3": 0.0,
+          "LaserData4": 0.0
+        },
+        {
+          "X": 22640.688,
+          "Y": 2877.294,
+          "Z": 246.0,
+          "AL": 0.0,
+          "LaserData1": 127.037,
+          "LaserData2": 0.0,
+          "LaserData3": 0.0,
+          "LaserData4": 0.0
+        },
+        {
+          "X": 22645.781,
+          "Y": 2975.183,
+          "Z": 246.0,
+          "AL": 0.0,
+          "LaserData1": 127.257,
+          "LaserData2": 0.0,
+          "LaserData3": 0.0,
+          "LaserData4": 0.0
+        },
+        {
+          "X": 22650.877,
+          "Y": 3073.072,
+          "Z": 246.0,
+          "AL": 0.0,
+          "LaserData1": 127.305,
+          "LaserData2": 0.0,
+          "LaserData3": 0.0,
+          "LaserData4": 0.0
+        },
+        {
+          "X": 22655.973,
+          "Y": 3170.961,
+          "Z": 246.0,
+          "AL": 0.0,
+          "LaserData1": 127.557,
+          "LaserData2": 0.0,
+          "LaserData3": 0.0,
+          "LaserData4": 0.0
+        },
+        {
+          "X": 22661.068,
+          "Y": 3268.85,
+          "Z": 246.0,
+          "AL": 0.0,
+          "LaserData1": 127.691,
+          "LaserData2": 0.0,
+          "LaserData3": 0.0,
+          "LaserData4": 0.0
+        },
+        {
+          "X": 22666.162,
+          "Y": 3366.739,
+          "Z": 246.0,
+          "AL": 0.0,
+          "LaserData1": 127.789,
+          "LaserData2": 0.0,
+          "LaserData3": 0.0,
+          "LaserData4": 0.0
+        },
+        {
+          "X": 22671.256,
+          "Y": 3464.628,
+          "Z": 246.0,
+          "AL": 0.0,
+          "LaserData1": 127.711,
+          "LaserData2": 0.0,
+          "LaserData3": 0.0,
+          "LaserData4": 0.0
+        },
+        {
+          "X": 22676.352,
+          "Y": 3562.517,
+          "Z": 246.0,
+          "AL": 0.0,
+          "LaserData1": 127.778,
+          "LaserData2": 0.0,
+          "LaserData3": 0.0,
+          "LaserData4": 0.0
+        },
+        {
+          "X": 22681.447,
+          "Y": 3660.406,
+          "Z": 246.0,
+          "AL": 0.0,
+          "LaserData1": 127.74,
+          "LaserData2": 0.0,
+          "LaserData3": 0.0,
+          "LaserData4": 0.0
+        },
+        {
+          "X": 22686.543,
+          "Y": 3758.295,
+          "Z": 246.0,
+          "AL": 0.0,
+          "LaserData1": 127.694,
+          "LaserData2": 0.0,
+          "LaserData3": 0.0,
+          "LaserData4": 0.0
+        },
+        {
+          "X": 22691.637,
+          "Y": 3856.184,
+          "Z": 246.0,
+          "AL": 0.0,
+          "LaserData1": 127.528,
+          "LaserData2": 0.0,
+          "LaserData3": 0.0,
+          "LaserData4": 0.0
+        },
+        {
+          "X": 22696.732,
+          "Y": 3954.073,
+          "Z": 246.0,
+          "AL": 0.0,
+          "LaserData1": 127.211,
+          "LaserData2": 0.0,
+          "LaserData3": 0.0,
+          "LaserData4": 0.0
+        },
+        {
+          "X": 22701.828,
+          "Y": 4051.962,
+          "Z": 246.0,
+          "AL": 0.0,
+          "LaserData1": 127.47,
+          "LaserData2": 0.0,
+          "LaserData3": 0.0,
+          "LaserData4": 0.0
+        },
+        {
+          "X": 22706.922,
+          "Y": 4149.851,
+          "Z": 246.0,
+          "AL": 0.0,
+          "LaserData1": 127.059,
+          "LaserData2": 0.0,
+          "LaserData3": 0.0,
+          "LaserData4": 0.0
+        },
+        {
+          "X": 22712.016,
+          "Y": 4247.74,
+          "Z": 246.0,
+          "AL": 0.0,
+          "LaserData1": 127.082,
+          "LaserData2": 0.0,
+          "LaserData3": 0.0,
+          "LaserData4": 0.0
+        },
+        {
+          "X": 22717.111,
+          "Y": 4345.629,
+          "Z": 246.0,
+          "AL": 0.0,
+          "LaserData1": 126.84,
+          "LaserData2": 0.0,
+          "LaserData3": 0.0,
+          "LaserData4": 0.0
+        },
+        {
+          "X": 22722.207,
+          "Y": 4443.518,
+          "Z": 246.0,
+          "AL": 0.0,
+          "LaserData1": 126.517,
+          "LaserData2": 0.0,
+          "LaserData3": 0.0,
+          "LaserData4": 0.0
+        },
+        {
+          "X": 22727.303,
+          "Y": 4541.407,
+          "Z": 246.0,
+          "AL": 0.0,
+          "LaserData1": 126.145,
+          "LaserData2": 0.0,
+          "LaserData3": 0.0,
+          "LaserData4": 0.0
+        },
+        {
+          "X": 22732.396,
+          "Y": 4639.296,
+          "Z": 246.0,
+          "AL": 0.0,
+          "LaserData1": 126.007,
+          "LaserData2": 0.0,
+          "LaserData3": 0.0,
+          "LaserData4": 0.0
+        },
+        {
+          "X": 22737.492,
+          "Y": 4737.185,
+          "Z": 246.0,
+          "AL": 0.0,
+          "LaserData1": 125.659,
+          "LaserData2": 0.0,
+          "LaserData3": 0.0,
+          "LaserData4": 0.0
+        },
+        {
+          "X": 22742.588,
+          "Y": 4835.074,
+          "Z": 246.0,
+          "AL": 0.0,
+          "LaserData1": 125.478,
+          "LaserData2": 0.0,
+          "LaserData3": 0.0,
+          "LaserData4": 0.0
+        }
+      ]
+    }
+  ]
+}

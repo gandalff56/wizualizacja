@@ -1,0 +1,170 @@
+{
+  "ProbeDataSessionList": [
+    {
+      "AcquiringTime": "2026-02-11T10:26:22.5129431+01:00",
+      "ProgramLineNumber": 0,
+      "ProbeDataPoints": [
+        {
+          "X": 5270.176,
+          "Y": 2862.563,
+          "Z": 0.0,
+          "AL": 0.0,
+          "LaserData1": 0.0,
+          "LaserData2": 0.0,
+          "LaserData3": 0.0,
+          "LaserData4": 0.0
+        },
+        {
+          "X": 5304.192,
+          "Y": 2662.563,
+          "Z": 0.0,
+          "AL": 0.0,
+          "LaserData1": 0.0,
+          "LaserData2": 0.0,
+          "LaserData3": 0.0,
+          "LaserData4": 0.0
+        },
+        {
+          "X": 5338.946,
+          "Y": 2462.563,
+          "Z": 0.0,
+          "AL": 0.0,
+          "LaserData1": 0.0,
+          "LaserData2": 0.0,
+          "LaserData3": 0.0,
+          "LaserData4": 0.0
+        },
+        {
+          "X": 5373.381,
+          "Y": 2262.563,
+          "Z": 0.0,
+          "AL": 0.0,
+          "LaserData1": 0.0,
+          "LaserData2": 0.0,
+          "LaserData3": 0.0,
+          "LaserData4": 0.0
+        },
+        {
+          "X": 5696.0,
+          "Y": 684.184,
+          "Z": 0.0,
+          "AL": 0.0,
+          "LaserData1": 0.0,
+          "LaserData2": 0.0,
+          "LaserData3": 0.0,
+          "LaserData4": 0.0
+        },
+        {
+          "X": 6096.0,
+          "Y": 751.664,
+          "Z": 0.0,
+          "AL": 0.0,
+          "LaserData1": 0.0,
+          "LaserData2": 0.0,
+          "LaserData3": 0.0,
+          "LaserData4": 0.0
+        },
+        {
+          "X": 6496.0,
+          "Y": 816.69,
+          "Z": 0.0,
+          "AL": 0.0,
+          "LaserData1": 0.0,
+          "LaserData2": 0.0,
+          "LaserData3": 0.0,
+          "LaserData4": 0.0
+        },
+        {
+          "X": 6896.0,
+          "Y": 879.584,
+          "Z": 0.0,
+          "AL": 0.0,
+          "LaserData1": 0.0,
+          "LaserData2": 0.0,
+          "LaserData3": 0.0,
+          "LaserData4": 0.0
+        },
+        {
+          "X": 31284.518,
+          "Y": 2952.056,
+          "Z": 0.0,
+          "AL": 0.0,
+          "LaserData1": 0.0,
+          "LaserData2": 0.0,
+          "LaserData3": 0.0,
+          "LaserData4": 0.0
+        },
+        {
+          "X": 31250.555,
+          "Y": 2752.056,
+          "Z": 0.0,
+          "AL": 0.0,
+          "LaserData1": 0.0,
+          "LaserData2": 0.0,
+          "LaserData3": 0.0,
+          "LaserData4": 0.0
+        },
+        {
+          "X": 31217.121,
+          "Y": 2552.056,
+          "Z": 0.0,
+          "AL": 0.0,
+          "LaserData1": 0.0,
+          "LaserData2": 0.0,
+          "LaserData3": 0.0,
+          "LaserData4": 0.0
+        },
+        {
+          "X": 31183.695,
+          "Y": 2352.056,
+          "Z": 0.0,
+          "AL": 0.0,
+          "LaserData1": 0.0,
+          "LaserData2": 0.0,
+          "LaserData3": 0.0,
+          "LaserData4": 0.0
+        },
+        {
+          "X": 30895.512,
+          "Y": 727.545,
+          "Z": 0.0,
+          "AL": 0.0,
+          "LaserData1": 0.0,
+          "LaserData2": 0.0,
+          "LaserData3": 0.0,
+          "LaserData4": 0.0
+        },
+        {
+          "X": 30495.512,
+          "Y": 793.424,
+          "Z": 0.0,
+          "AL": 0.0,
+          "LaserData1": 0.0,
+          "LaserData2": 0.0,
+          "LaserData3": 0.0,
+          "LaserData4": 0.0
+        },
+        {
+          "X": 30095.512,
+          "Y": 855.996,
+          "Z": 0.0,
+          "AL": 0.0,
+          "LaserData1": 0.0,
+          "LaserData2": 0.0,
+          "LaserData3": 0.0,
+          "LaserData4": 0.0
+        },
+        {
+          "X": 29695.512,
+          "Y": 918.675,
+          "Z": 0.0,
+          "AL": 0.0,
+          "LaserData1": 0.0,
+          "LaserData2": 0.0,
+          "LaserData3": 0.0,
+          "LaserData4": 0.0
+        }
+      ]
+    }
+  ]
+}
