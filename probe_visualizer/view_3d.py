@@ -1,6 +1,7 @@
 import numpy as np
 from PyQt5.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QSlider
-from PyQt5.QtCore import Qt
+from PyQt5.QtCore import Qt, QPoint
+from PyQt5.QtGui import QMatrix4x4, QVector3D, QVector4D, QCursor
 
 import pyqtgraph.opengl as gl
 import matplotlib.cm as cm
@@ -19,6 +20,18 @@ class View3D(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.gl_widget = gl.GLViewWidget()
+        self.gl_widget.setMouseTracking(True)
+
+        # Tooltip overlay
+        self.tooltip_label = QLabel(self.gl_widget)
+        self.tooltip_label.setStyleSheet(
+            "background-color: rgba(0, 0, 0, 180); color: white; "
+            "padding: 4px 8px; border-radius: 4px; font-size: 12px;"
+        )
+        self.tooltip_label.hide()
+
+        # Install event filter for mouse tracking on GL widget
+        self.gl_widget.installEventFilter(self)
 
         self.z_scale_slider = QSlider(Qt.Horizontal)
         self.z_scale_slider.setMinimum(1)
@@ -44,6 +57,74 @@ class View3D(QWidget):
         self.color_mode = "side"
         self._items = []
 
+        # For hover tooltip: store original and transformed points
+        self._original_points = []  # list of (side_name, np.ndarray shape (N,3))
+        self._transformed_points = []  # list of np.ndarray shape (N,3) in GL coords
+
+    def eventFilter(self, obj, event):
+        from PyQt5.QtCore import QEvent
+        if obj is self.gl_widget and event.type() == QEvent.MouseMove:
+            self._on_mouse_move(event.pos())
+        return super().eventFilter(obj, event)
+
+    def _project_point(self, pt_3d, view_matrix, proj_matrix, width, height):
+        """Project a 3D point to 2D screen coordinates."""
+        v = QVector4D(pt_3d[0], pt_3d[1], pt_3d[2], 1.0)
+        v = view_matrix * v
+        v = proj_matrix * v
+        if abs(v.w()) < 1e-10:
+            return None
+        ndc_x = v.x() / v.w()
+        ndc_y = v.y() / v.w()
+        screen_x = (ndc_x + 1.0) * 0.5 * width
+        screen_y = (1.0 - ndc_y) * 0.5 * height  # flip Y
+        return (screen_x, screen_y)
+
+    def _on_mouse_move(self, pos):
+        if self.data is None or not self._transformed_points:
+            self.tooltip_label.hide()
+            return
+
+        mx, my = pos.x(), pos.y()
+        w = self.gl_widget.width()
+        h = self.gl_widget.height()
+
+        view_matrix = QMatrix4x4(np.array(self.gl_widget.viewMatrix().glData(), dtype=np.float32))
+        proj_matrix = QMatrix4x4(np.array(self.gl_widget.projectionMatrix().glData(), dtype=np.float32))
+
+        best_dist = 15.0  # max pixel radius
+        best_orig = None
+        best_side = None
+
+        for (side_name, orig_pts), trans_pts in zip(self._original_points, self._transformed_points):
+            for j in range(len(trans_pts)):
+                screen = self._project_point(trans_pts[j], view_matrix, proj_matrix, w, h)
+                if screen is None:
+                    continue
+                dx = screen[0] - mx
+                dy = screen[1] - my
+                dist = (dx * dx + dy * dy) ** 0.5
+                if dist < best_dist:
+                    best_dist = dist
+                    best_orig = orig_pts[j]
+                    best_side = side_name
+
+        if best_orig is not None:
+            self.tooltip_label.setText(
+                f"{best_side}\n"
+                f"X: {best_orig[0]:.3f}\n"
+                f"Y: {best_orig[1]:.3f}\n"
+                f"Z: {best_orig[2]:.3f}"
+            )
+            # Position tooltip near cursor but inside widget
+            tx = min(mx + 15, w - self.tooltip_label.sizeHint().width() - 5)
+            ty = max(my - self.tooltip_label.sizeHint().height() - 5, 5)
+            self.tooltip_label.move(tx, ty)
+            self.tooltip_label.adjustSize()
+            self.tooltip_label.show()
+        else:
+            self.tooltip_label.hide()
+
     def _get_z_scale(self):
         return self.z_scale_slider.value() / 10.0
 
@@ -63,6 +144,9 @@ class View3D(QWidget):
         for item in self._items:
             self.gl_widget.removeItem(item)
         self._items.clear()
+        self._original_points.clear()
+        self._transformed_points.clear()
+        self.tooltip_label.hide()
 
         if self.data is None:
             return
@@ -91,6 +175,10 @@ class View3D(QWidget):
             pts[:, 0] -= center_x
             pts[:, 1] -= center_y
             pts[:, 2] = (pts[:, 2] - center_z) * z_scale
+
+            # Store for hover lookup
+            self._original_points.append((side.name, side.points.copy()))
+            self._transformed_points.append(pts.copy())
 
             if self.color_mode == "side":
                 color = _hex_to_gl(get_color_for_side(side.name, i))
