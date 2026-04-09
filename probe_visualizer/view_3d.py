@@ -220,7 +220,7 @@ class View3D(QWidget):
 
         return screen_x, screen_y, depth, valid
 
-    def _find_nearest_point(self, pos, max_dist=15.0):
+    def _find_nearest_point(self, pos, max_dist=8.0):
         """Vectorized nearest-point search. Prefers points closer to camera."""
         if self._all_trans_flat is None or len(self._all_trans_flat) == 0:
             return None
@@ -241,8 +241,19 @@ class View3D(QWidget):
         if len(candidates) == 0:
             return None
 
-        # Among candidates, pick the one closest to camera (smallest depth)
-        best_candidate = candidates[np.argmin(depth[candidates])]
+        # Pick closest in 2D (nearest to cursor). Only use depth as tiebreaker
+        # for points within 2px of each other on screen.
+        cand_dist = dist_sq[candidates]
+        best_2d = candidates[np.argmin(cand_dist)]
+        best_dist_val = cand_dist[np.argmin(cand_dist)]
+
+        # Check if any other candidate is almost equally close in 2D (within 2px)
+        tiebreak_threshold = best_dist_val + 4.0  # 2px squared
+        tied = candidates[cand_dist < tiebreak_threshold]
+        if len(tied) > 1:
+            best_candidate = tied[np.argmin(depth[tied])]
+        else:
+            best_candidate = best_2d
 
         return (
             int(self._all_side_idx[best_candidate]),
