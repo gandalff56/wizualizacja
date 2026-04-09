@@ -6,12 +6,8 @@ from PyQt5.QtWidgets import (
     QDoubleSpinBox, QTabWidget, QTableWidget, QTableWidgetItem,
     QHeaderView,
 )
-from PyQt5.QtCore import Qt
+from PyQt5.QtCore import Qt, QTimer
 from PyQt5.QtGui import QKeySequence
-
-from probe_visualizer.data_loader import ProbeData
-from probe_visualizer.view_2d import View2D
-from probe_visualizer.view_3d import View3D
 
 
 class MainWindow(QMainWindow):
@@ -27,10 +23,14 @@ class MainWindow(QMainWindow):
         self._sel_side_idx = -1
         self._sel_pt_idx = -1
         self._editing = False
+        self._views_ready = False
 
         self._setup_menu()
-        self._setup_ui()
+        self._setup_ui_shell()
         self._setup_statusbar()
+
+        # Defer heavy widget creation to after window is shown
+        QTimer.singleShot(0, self._init_views_deferred)
 
     def _setup_menu(self):
         menu = self.menuBar()
@@ -58,7 +58,8 @@ class MainWindow(QMainWindow):
         exit_action.triggered.connect(self.close)
         file_menu.addAction(exit_action)
 
-    def _setup_ui(self):
+    def _setup_ui_shell(self):
+        """Build the UI layout with placeholders - no heavy imports yet."""
         central = QWidget()
         self.setCentralWidget(central)
         main_layout = QVBoxLayout(central)
@@ -106,23 +107,30 @@ class MainWindow(QMainWindow):
         main_layout.addWidget(scroll)
         self.side_checks = {}
 
-        # Main content: views + right panel
-        content_layout = QHBoxLayout()
+        # Main content area
+        self._content_layout = QHBoxLayout()
 
+        # Placeholder for stacked views (will be populated in deferred init)
         self.stack = QStackedWidget()
-        self.view_2d = View2D()
-        self.view_3d = View3D()
-        self.stack.addWidget(self.view_2d)
-        self.stack.addWidget(self.view_3d)
-        content_layout.addWidget(self.stack, stretch=1)
+        self._loading_label = QLabel("Loading...")
+        self._loading_label.setAlignment(Qt.AlignCenter)
+        self.stack.addWidget(self._loading_label)
+        self._content_layout.addWidget(self.stack, stretch=1)
 
-        self.view_3d.point_selected.connect(self._on_point_selected)
-
-        # Right panel with tabs
+        # Right panel with tabs (lightweight - build now)
         self.right_tabs = QTabWidget()
         self.right_tabs.setFixedWidth(300)
+        self._build_edit_tab()
+        self._build_stats_tab()
+        self._content_layout.addWidget(self.right_tabs)
 
-        # Tab 1: Edit Point
+        main_layout.addLayout(self._content_layout, stretch=1)
+
+        # View references (set in deferred init)
+        self.view_2d = None
+        self.view_3d = None
+
+    def _build_edit_tab(self):
         edit_tab = QWidget()
         edit_layout = QVBoxLayout(edit_tab)
 
@@ -152,11 +160,10 @@ class MainWindow(QMainWindow):
         edit_layout.addStretch()
         self.right_tabs.addTab(edit_tab, "Edit Point")
 
-        # Tab 2: Statistics
+    def _build_stats_tab(self):
         stats_tab = QWidget()
         stats_layout = QVBoxLayout(stats_tab)
 
-        # Z stats table
         stats_layout.addWidget(QLabel("Z Statistics per Side:"))
         self.stats_table = QTableWidget()
         self.stats_table.setColumnCount(7)
@@ -170,7 +177,6 @@ class MainWindow(QMainWindow):
         self.stats_table.setAlternatingRowColors(True)
         stats_layout.addWidget(self.stats_table)
 
-        # Plate dimensions
         stats_layout.addWidget(QLabel("Plate Dimensions:"))
         self.plate_info = QLabel("No data loaded")
         self.plate_info.setWordWrap(True)
@@ -182,13 +188,28 @@ class MainWindow(QMainWindow):
         stats_layout.addStretch()
         self.right_tabs.addTab(stats_tab, "Statistics")
 
-        content_layout.addWidget(self.right_tabs)
-        main_layout.addLayout(content_layout, stretch=1)
+    def _init_views_deferred(self):
+        """Create heavy view widgets after the window is already visible."""
+        from probe_visualizer.view_2d import View2D
+        from probe_visualizer.view_3d import View3D
+
+        # Remove loading placeholder
+        self.stack.removeWidget(self._loading_label)
+        self._loading_label.deleteLater()
+
+        self.view_2d = View2D()
+        self.view_3d = View3D()
+        self.stack.addWidget(self.view_2d)
+        self.stack.addWidget(self.view_3d)
+
+        self.view_3d.point_selected.connect(self._on_point_selected)
+        self._views_ready = True
+        self.status_bar.showMessage("Ready - open a JSON file to start")
 
     def _setup_statusbar(self):
         self.status_bar = QStatusBar()
         self.setStatusBar(self.status_bar)
-        self.status_bar.showMessage("Ready - open a JSON file to start")
+        self.status_bar.showMessage("Starting up...")
 
     def _rebuild_side_checks(self):
         for cb in self.side_checks.values():
@@ -213,7 +234,6 @@ class MainWindow(QMainWindow):
             self.plate_info.setText("No data loaded")
             return
 
-        # Z stats table
         stats = self.data.side_stats()
         self.stats_table.setRowCount(len(stats))
         for row, s in enumerate(stats):
@@ -225,7 +245,6 @@ class MainWindow(QMainWindow):
             self.stats_table.setItem(row, 5, QTableWidgetItem(f"{s['z_std']:.2f}"))
             self.stats_table.setItem(row, 6, QTableWidgetItem(f"{s['span']:.1f}"))
 
-        # Plate dimensions
         dims = self.data.plate_dimensions()
         if dims is None:
             self.plate_info.setText("Not enough sides for plate calculation")
@@ -252,6 +271,12 @@ class MainWindow(QMainWindow):
         self.plate_info.setText("\n".join(lines))
 
     def _open_file(self):
+        if not self._views_ready:
+            QMessageBox.information(
+                self, "Please wait", "Views are still loading..."
+            )
+            return
+
         path, _ = QFileDialog.getOpenFileName(
             self, "Open Probe Data", "",
             "JSON Files (*.json);;All Files (*)"
@@ -259,6 +284,7 @@ class MainWindow(QMainWindow):
         if not path:
             return
 
+        from probe_visualizer.data_loader import ProbeData
         try:
             self.data = ProbeData.from_json_file(path)
         except Exception as e:
@@ -329,6 +355,8 @@ class MainWindow(QMainWindow):
     def _on_spin_changed(self):
         if self._editing or self._sel_side_idx < 0 or self.data is None:
             return
+        if not self._views_ready:
+            return
         x = self.spin_x.value()
         y = self.spin_y.value()
         z = self.spin_z.value()
@@ -360,7 +388,7 @@ class MainWindow(QMainWindow):
             cb.setChecked(False)
 
     def _refresh_views(self):
-        if self.data is None:
+        if self.data is None or not self._views_ready:
             return
         self.view_2d.update_plot(self.data, self.visible_sides, self.color_mode)
         self.view_3d.update_plot(self.data, self.visible_sides, self.color_mode)

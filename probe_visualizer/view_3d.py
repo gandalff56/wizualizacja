@@ -1,4 +1,3 @@
-import time
 import numpy as np
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QSlider, QCheckBox,
@@ -6,15 +5,31 @@ from PyQt5.QtWidgets import (
 from PyQt5.QtCore import Qt, pyqtSignal, QTimer
 
 import pyqtgraph.opengl as gl
-import matplotlib.cm as cm
 
 from probe_visualizer.colors import get_color_for_side
 
-try:
-    from scipy.spatial import Delaunay
-    HAS_SCIPY = True
-except ImportError:
-    HAS_SCIPY = False
+# Lazy imports - loaded on first use
+_cmap_cache = None
+_Delaunay = None
+
+
+def _get_cmap():
+    global _cmap_cache
+    if _cmap_cache is None:
+        import matplotlib.cm as cm
+        _cmap_cache = cm.get_cmap("viridis")
+    return _cmap_cache
+
+
+def _get_delaunay():
+    global _Delaunay
+    if _Delaunay is None:
+        try:
+            from scipy.spatial import Delaunay
+            _Delaunay = Delaunay
+        except ImportError:
+            _Delaunay = False  # sentinel: tried but failed
+    return _Delaunay if _Delaunay is not False else None
 
 
 def _hex_to_gl(hex_color, alpha=1.0):
@@ -324,13 +339,14 @@ class View3D(QWidget):
 
     def _compute_delaunay_cache(self, all_centered_xy):
         """Pre-compute Delaunay triangulation with face filtering."""
-        if not HAS_SCIPY or len(all_centered_xy) < 4:
+        DelaunayClass = _get_delaunay()
+        if DelaunayClass is None or len(all_centered_xy) < 4:
             self._cached_delaunay = None
             self._cached_good_faces = None
             return
 
         try:
-            tri = Delaunay(all_centered_xy)
+            tri = DelaunayClass(all_centered_xy)
         except Exception:
             self._cached_delaunay = None
             self._cached_good_faces = None
@@ -412,9 +428,9 @@ class View3D(QWidget):
         z_scale = self.z_scale_slider.value() / 10.0
         pt_size = self.pt_size_slider.value()
         show_arrows = self.arrows_check.isChecked()
-        show_surface = self.surface_check.isChecked() and HAS_SCIPY
+        show_surface = self.surface_check.isChecked() and _get_delaunay() is not None
         z_range = z_max - z_min if z_max - z_min > 1e-9 else 1.0
-        cmap = cm.get_cmap("viridis")
+        cmap = _get_cmap()
 
         # Build transformed points and flat arrays for hover
         all_trans_list = []
