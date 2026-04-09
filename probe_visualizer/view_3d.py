@@ -190,7 +190,7 @@ class View3D(QWidget):
         # Get 4x4 matrices as numpy arrays
         vm = self._matrix_to_numpy(self.gl_widget.viewMatrix())
         pm = self._matrix_to_numpy(
-            self.gl_widget.projectionMatrix(region=None, viewport=(0, 0, w, h))
+            self.gl_widget.projectionMatrix(region=(0, 0, w, h), viewport=(0, 0, w, h))
         )
         mvp = pm @ vm  # combined model-view-projection
 
