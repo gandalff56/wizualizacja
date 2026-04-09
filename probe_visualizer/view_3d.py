@@ -187,9 +187,11 @@ class View3D(QWidget):
         if w == 0 or h == 0:
             return None
 
-        # Get 4x4 matrices as numpy arrays (compatible with both pyqtgraph Transform3D and QMatrix4x4)
+        # Get 4x4 matrices as numpy arrays
         vm = self._matrix_to_numpy(self.gl_widget.viewMatrix())
-        pm = self._matrix_to_numpy(self.gl_widget.projectionMatrix())
+        pm = self._matrix_to_numpy(
+            self.gl_widget.projectionMatrix(region=None, viewport=(0, 0, w, h))
+        )
         mvp = pm @ vm  # combined model-view-projection
 
         # Homogeneous coords: (N, 4)
