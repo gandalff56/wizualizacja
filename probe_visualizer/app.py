@@ -202,6 +202,8 @@ class MainWindow(QMainWindow):
         self.stack.addWidget(self.view_2d)
         self.stack.addWidget(self.view_3d)
 
+        # Connect point selection from both views
+        self.view_2d.point_selected.connect(self._on_point_selected)
         self.view_3d.point_selected.connect(self._on_point_selected)
         self._views_ready = True
         self.status_bar.showMessage("Ready - open a JSON file to start")
@@ -351,6 +353,10 @@ class MainWindow(QMainWindow):
         self.spin_y.setValue(y)
         self.spin_z.setValue(z)
         self._editing = False
+
+        # Sync highlight in both views
+        self.view_2d.highlight_point(side_idx, pt_idx)
+        self.view_3d.highlight_point(side_idx, pt_idx)
 
     def _on_spin_changed(self):
         if self._editing or self._sel_side_idx < 0 or self.data is None:
