@@ -181,7 +181,8 @@ class View3D(QWidget):
         return result
 
     def _project_all_points(self, trans_pts):
-        """Project N x 3 points to screen coords using numpy vectorization."""
+        """Project N x 3 points to screen coords using numpy vectorization.
+        Returns screen_x, screen_y, depth, valid arrays."""
         w = self.gl_widget.width()
         h = self.gl_widget.height()
         if w == 0 or h == 0:
@@ -209,14 +210,18 @@ class View3D(QWidget):
         ndc[valid, 0] = clip[valid, 0] / w_clip[valid]
         ndc[valid, 1] = clip[valid, 1] / w_clip[valid]
 
+        # Depth (closer to camera = smaller value)
+        depth = np.full(n, 1e18, dtype=np.float64)
+        depth[valid] = clip[valid, 2] / w_clip[valid]
+
         # NDC to screen
         screen_x = (ndc[:, 0] + 1.0) * 0.5 * w
         screen_y = (1.0 - ndc[:, 1]) * 0.5 * h
 
-        return screen_x, screen_y, valid
+        return screen_x, screen_y, depth, valid
 
     def _find_nearest_point(self, pos, max_dist=15.0):
-        """Vectorized nearest-point search."""
+        """Vectorized nearest-point search. Prefers points closer to camera."""
         if self._all_trans_flat is None or len(self._all_trans_flat) == 0:
             return None
 
@@ -225,20 +230,25 @@ class View3D(QWidget):
         if result is None:
             return None
 
-        sx, sy, valid = result
+        sx, sy, depth, valid = result
         dist_sq = (sx - mx) ** 2 + (sy - my) ** 2
-        dist_sq[~valid] = 1e18  # invalidate
+        dist_sq[~valid] = 1e18
 
         max_dist_sq = max_dist * max_dist
-        idx = np.argmin(dist_sq)
-        if dist_sq[idx] > max_dist_sq:
+
+        # Find all points within max_dist
+        candidates = np.where(dist_sq < max_dist_sq)[0]
+        if len(candidates) == 0:
             return None
 
+        # Among candidates, pick the one closest to camera (smallest depth)
+        best_candidate = candidates[np.argmin(depth[candidates])]
+
         return (
-            int(self._all_side_idx[idx]),
-            int(self._all_pt_idx[idx]),
-            self._all_side_names[idx],
-            self._all_orig_flat[idx],
+            int(self._all_side_idx[best_candidate]),
+            int(self._all_pt_idx[best_candidate]),
+            self._all_side_names[best_candidate],
+            self._all_orig_flat[best_candidate],
         )
 
     # === MOUSE EVENTS ===
