@@ -4,7 +4,7 @@ from PyQt5.QtWidgets import (
     QComboBox, QCheckBox, QGroupBox, QPushButton, QFileDialog,
     QMessageBox, QStatusBar, QAction, QLabel, QScrollArea,
     QDoubleSpinBox, QTabWidget, QTableWidget, QTableWidgetItem,
-    QHeaderView,
+    QHeaderView, QDialog,
 )
 from PyQt5.QtCore import Qt, QTimer
 from PyQt5.QtGui import QKeySequence
@@ -24,6 +24,7 @@ class MainWindow(QMainWindow):
         self._sel_pt_idx = -1
         self._editing = False
         self._views_ready = False
+        self._stats_dialog = None
 
         self._setup_menu()
         self._setup_ui_shell()
@@ -164,6 +165,10 @@ class MainWindow(QMainWindow):
         stats_tab = QWidget()
         stats_layout = QVBoxLayout(stats_tab)
 
+        popout_btn = QPushButton("Open in Window")
+        popout_btn.clicked.connect(self._open_stats_window)
+        stats_layout.addWidget(popout_btn)
+
         stats_layout.addWidget(QLabel("Z Statistics per Side:"))
         self.stats_table = QTableWidget()
         self.stats_table.setColumnCount(7)
@@ -271,6 +276,61 @@ class MainWindow(QMainWindow):
             lines.append(f"Diag diff:  {diff:.1f} mm")
 
         self.plate_info.setText("\n".join(lines))
+
+        # Update popup window if open
+        if self._stats_dialog is not None and self._stats_dialog.isVisible():
+            self._populate_stats_dialog()
+
+    def _open_stats_window(self):
+        if self._stats_dialog is None:
+            self._stats_dialog = QDialog(self)
+            self._stats_dialog.setWindowTitle("Statistics")
+            self._stats_dialog.resize(700, 500)
+            layout = QVBoxLayout(self._stats_dialog)
+
+            self._dlg_table = QTableWidget()
+            self._dlg_table.setColumnCount(7)
+            self._dlg_table.setHorizontalHeaderLabels(
+                ["Side", "Pts", "Z min", "Z max", "Z avg", "Z std", "Length"]
+            )
+            self._dlg_table.horizontalHeader().setSectionResizeMode(
+                QHeaderView.Stretch
+            )
+            self._dlg_table.setEditTriggers(QTableWidget.NoEditTriggers)
+            self._dlg_table.setAlternatingRowColors(True)
+            layout.addWidget(self._dlg_table)
+
+            layout.addWidget(QLabel("Plate Dimensions:"))
+            self._dlg_plate_info = QLabel("No data loaded")
+            self._dlg_plate_info.setWordWrap(True)
+            self._dlg_plate_info.setStyleSheet(
+                "background-color: #2a2a2a; color: #ddd; padding: 10px; "
+                "border-radius: 4px; font-family: monospace; font-size: 12px;"
+            )
+            layout.addWidget(self._dlg_plate_info)
+
+        self._populate_stats_dialog()
+        self._stats_dialog.show()
+        self._stats_dialog.raise_()
+
+    def _populate_stats_dialog(self):
+        if self.data is None:
+            self._dlg_table.setRowCount(0)
+            self._dlg_plate_info.setText("No data loaded")
+            return
+
+        stats = self.data.side_stats()
+        self._dlg_table.setRowCount(len(stats))
+        for row, s in enumerate(stats):
+            self._dlg_table.setItem(row, 0, QTableWidgetItem(s["name"]))
+            self._dlg_table.setItem(row, 1, QTableWidgetItem(str(s["count"])))
+            self._dlg_table.setItem(row, 2, QTableWidgetItem(f"{s['z_min']:.2f}"))
+            self._dlg_table.setItem(row, 3, QTableWidgetItem(f"{s['z_max']:.2f}"))
+            self._dlg_table.setItem(row, 4, QTableWidgetItem(f"{s['z_avg']:.2f}"))
+            self._dlg_table.setItem(row, 5, QTableWidgetItem(f"{s['z_std']:.2f}"))
+            self._dlg_table.setItem(row, 6, QTableWidgetItem(f"{s['span']:.1f}"))
+
+        self._dlg_plate_info.setText(self.plate_info.text())
 
     def _open_file(self):
         if not self._views_ready:
