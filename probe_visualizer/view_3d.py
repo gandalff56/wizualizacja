@@ -154,6 +154,32 @@ class View3D(QWidget):
 
     # === VECTORIZED HOVER/CLICK (no Python loops) ===
 
+    @staticmethod
+    def _matrix_to_numpy(mat):
+        """Convert pyqtgraph Transform3D or QMatrix4x4 to numpy 4x4 array."""
+        if hasattr(mat, 'glData'):
+            # pyqtgraph Transform3D
+            return np.array(mat.glData(), dtype=np.float64).reshape(4, 4)
+        # QMatrix4x4 - extract via data() or copyDataTo() or row-by-row
+        if hasattr(mat, 'data'):
+            try:
+                return np.array(mat.data(), dtype=np.float64).reshape(4, 4)
+            except Exception:
+                pass
+        if hasattr(mat, 'copyDataTo'):
+            try:
+                arr = [0.0] * 16
+                mat.copyDataTo(arr)
+                return np.array(arr, dtype=np.float64).reshape(4, 4)
+            except Exception:
+                pass
+        # Fallback: read row by row
+        result = np.zeros((4, 4), dtype=np.float64)
+        for r in range(4):
+            row = mat.row(r)
+            result[r] = [row.x(), row.y(), row.z(), row.w()]
+        return result
+
     def _project_all_points(self, trans_pts):
         """Project N x 3 points to screen coords using numpy vectorization."""
         w = self.gl_widget.width()
@@ -161,9 +187,9 @@ class View3D(QWidget):
         if w == 0 or h == 0:
             return None
 
-        # Get 4x4 matrices as numpy arrays
-        vm = np.array(self.gl_widget.viewMatrix().glData(), dtype=np.float64).reshape(4, 4)
-        pm = np.array(self.gl_widget.projectionMatrix().glData(), dtype=np.float64).reshape(4, 4)
+        # Get 4x4 matrices as numpy arrays (compatible with both pyqtgraph Transform3D and QMatrix4x4)
+        vm = self._matrix_to_numpy(self.gl_widget.viewMatrix())
+        pm = self._matrix_to_numpy(self.gl_widget.projectionMatrix())
         mvp = pm @ vm  # combined model-view-projection
 
         # Homogeneous coords: (N, 4)
