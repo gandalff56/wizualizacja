@@ -39,6 +39,13 @@ def _hex_to_gl(hex_color, alpha=1.0):
     return (r, g, b, alpha)
 
 
+def _ev_pos(ev):
+    """Get event position compatible with both old and new Qt5."""
+    if hasattr(ev, 'position'):
+        return ev.position().toPoint()
+    return ev.pos()
+
+
 class InteractiveGLWidget(gl.GLViewWidget):
     """GLViewWidget with mouse tracking for hover and click."""
 
@@ -48,23 +55,29 @@ class InteractiveGLWidget(gl.GLViewWidget):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.setMouseTracking(True)
-        self._press_pos = None
+        self._press_x = None
+        self._press_y = None
 
     def mousePressEvent(self, ev):
         if ev.button() == Qt.LeftButton:
-            self._press_pos = ev.pos()
+            p = _ev_pos(ev)
+            self._press_x = p.x()
+            self._press_y = p.y()
         super().mousePressEvent(ev)
 
     def mouseMoveEvent(self, ev):
-        self.hover_moved.emit(ev.pos())
+        self.hover_moved.emit(_ev_pos(ev))
         super().mouseMoveEvent(ev)
 
     def mouseReleaseEvent(self, ev):
-        if ev.button() == Qt.LeftButton and self._press_pos is not None:
-            delta = ev.pos() - self._press_pos
-            if abs(delta.x()) < 5 and abs(delta.y()) < 5:
-                self.point_clicked.emit(ev.pos())
-        self._press_pos = None
+        if ev.button() == Qt.LeftButton and self._press_x is not None:
+            p = _ev_pos(ev)
+            dx = abs(p.x() - self._press_x)
+            dy = abs(p.y() - self._press_y)
+            if dx < 5 and dy < 5:
+                self.point_clicked.emit(p)
+        self._press_x = None
+        self._press_y = None
         super().mouseReleaseEvent(ev)
 
 
@@ -518,19 +531,24 @@ class View3D(QWidget):
         self.gl_widget.addItem(item)
 
     def _draw_arrows_batched(self, pts):
-        """Draw all arrows for a side in a single GLLinePlotItem."""
+        """Draw 2 direction arrows per side: at 1/3 and 2/3 of the path."""
         n = len(pts)
-        step = max(1, n // 15)
-        arrow_len = 0.02 * max(
+        if n < 3:
+            return
+
+        span = max(
             pts[:, 0].max() - pts[:, 0].min(),
             pts[:, 1].max() - pts[:, 1].min(),
             1.0,
         )
+        arrow_len = span * 0.03
 
         lines = []
-        for j in range(0, n - 1, step):
+        for frac in (0.33, 0.66):
+            j = int(frac * (n - 1))
+            j = max(0, min(j, n - 2))
             p0 = pts[j]
-            p1 = pts[min(j + 1, n - 1)]
+            p1 = pts[j + 1]
             d = p1 - p0
             length = np.linalg.norm(d)
             if length < 1e-10:
@@ -546,8 +564,8 @@ class View3D(QWidget):
         if lines:
             self._add_item(gl.GLLinePlotItem(
                 pos=np.array(lines),
-                color=(1.0, 1.0, 1.0, 0.7),
-                width=1.5, antialias=True, mode="lines",
+                color=(1.0, 1.0, 1.0, 0.8),
+                width=2.0, antialias=True, mode="lines",
             ))
 
     def _draw_surface_cached(self, combined, z_min, z_max, z_scale, cz, cmap):
