@@ -151,25 +151,35 @@ class View3D(QWidget):
         self._cached_z_range = None
         self._data_version = 0
 
-    # === PROJECTION (read matrices directly from OpenGL) ===
+    # === PROJECTION (using pyqtgraph's own matrix methods) ===
+
+    @staticmethod
+    def _qmatrix_to_numpy(m):
+        """Convert QMatrix4x4 to numpy 4x4 array (row-major)."""
+        arr = np.zeros((4, 4), dtype=np.float64)
+        for r in range(4):
+            for c in range(4):
+                arr[r, c] = m.row(r)[c]
+        return arr
 
     def _project_all_points(self, trans_pts):
-        """Project points to screen by reading actual OpenGL matrices from GPU."""
+        """Project 3D points to 2D screen coords using pyqtgraph's matrices."""
         w = self.gl_widget.width()
         h = self.gl_widget.height()
         if w == 0 or h == 0 or len(trans_pts) == 0:
             return None
 
         try:
-            self.gl_widget.makeCurrent()
-            from OpenGL.GL import glGetDoublev, GL_MODELVIEW_MATRIX, GL_PROJECTION_MATRIX
-            # OpenGL returns column-major, transpose to row-major for numpy
-            vm = np.array(glGetDoublev(GL_MODELVIEW_MATRIX), dtype=np.float64).reshape(4, 4).T
-            pm = np.array(glGetDoublev(GL_PROJECTION_MATRIX), dtype=np.float64).reshape(4, 4).T
+            vm = self.gl_widget.viewMatrix()
+            pm = self.gl_widget.projectionMatrix(
+                region=(0, 0, w, h), viewport=(0, 0, w, h)
+            )
         except Exception:
             return None
 
-        mvp = pm @ vm
+        vm_np = self._qmatrix_to_numpy(vm)
+        pm_np = self._qmatrix_to_numpy(pm)
+        mvp = pm_np @ vm_np
 
         n = len(trans_pts)
         pts4 = np.hstack([trans_pts, np.ones((n, 1), dtype=np.float64)])
