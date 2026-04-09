@@ -1,5 +1,4 @@
 import numpy as np
-from math import tan, radians, cos, sin
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QSlider, QCheckBox,
 )
@@ -46,60 +45,6 @@ def _ev_pos(ev):
     return ev.pos()
 
 
-def _build_view_matrix(opts):
-    """Build 4x4 view matrix from pyqtgraph camera opts (distance, elevation, azimuth, center)."""
-    dist = opts['distance']
-    elev = radians(opts['elevation'])
-    azim = radians(opts['azimuth'])
-    center = opts.get('center', None)
-    if center is not None and hasattr(center, 'x'):
-        cx, cy, cz = center.x(), center.y(), center.z()
-    elif center is not None:
-        cx, cy, cz = float(center[0]), float(center[1]), float(center[2])
-    else:
-        cx, cy, cz = 0.0, 0.0, 0.0
-
-    # Camera position in world space
-    cam_x = cx + dist * cos(elev) * cos(azim)
-    cam_y = cy + dist * cos(elev) * sin(azim)
-    cam_z = cz + dist * sin(elev)
-
-    # Look-at matrix
-    forward = np.array([cx - cam_x, cy - cam_y, cz - cam_z], dtype=np.float64)
-    forward /= np.linalg.norm(forward) + 1e-30
-
-    world_up = np.array([0, 0, 1], dtype=np.float64)
-    right = np.cross(forward, world_up)
-    rn = np.linalg.norm(right)
-    if rn < 1e-10:
-        world_up = np.array([0, 1, 0], dtype=np.float64)
-        right = np.cross(forward, world_up)
-        rn = np.linalg.norm(right)
-    right /= rn
-    up = np.cross(right, forward)
-
-    vm = np.eye(4, dtype=np.float64)
-    vm[0, :3] = right
-    vm[1, :3] = up
-    vm[2, :3] = -forward
-    vm[0, 3] = -np.dot(right, [cam_x, cam_y, cam_z])
-    vm[1, 3] = -np.dot(up, [cam_x, cam_y, cam_z])
-    vm[2, 3] = np.dot(forward, [cam_x, cam_y, cam_z])
-    return vm
-
-
-def _build_proj_matrix(fov, aspect, near, far):
-    """Build perspective projection matrix."""
-    f = 1.0 / tan(radians(fov) * 0.5)
-    pm = np.zeros((4, 4), dtype=np.float64)
-    pm[0, 0] = f / aspect
-    pm[1, 1] = f
-    pm[2, 2] = (far + near) / (near - far)
-    pm[2, 3] = (2.0 * far * near) / (near - far)
-    pm[3, 2] = -1.0
-    return pm
-
-
 class InteractiveGLWidget(gl.GLViewWidget):
     point_clicked = pyqtSignal(object)
 
@@ -107,6 +52,11 @@ class InteractiveGLWidget(gl.GLViewWidget):
         if ev.button() == Qt.LeftButton:
             self.point_clicked.emit(_ev_pos(ev))
         super().mouseDoubleClickEvent(ev)
+
+    def mouseReleaseEvent(self, ev):
+        if ev.button() == Qt.RightButton:
+            self.point_clicked.emit(_ev_pos(ev))
+        super().mouseReleaseEvent(ev)
 
 
 class View3D(QWidget):
@@ -201,24 +151,24 @@ class View3D(QWidget):
         self._cached_z_range = None
         self._data_version = 0
 
-    # === PROJECTION (pure numpy, no Qt/pyqtgraph matrix API) ===
+    # === PROJECTION (read matrices directly from OpenGL) ===
 
     def _project_all_points(self, trans_pts):
-        """Project points to screen using camera opts directly. No Qt matrix API."""
+        """Project points to screen by reading actual OpenGL matrices from GPU."""
         w = self.gl_widget.width()
         h = self.gl_widget.height()
         if w == 0 or h == 0 or len(trans_pts) == 0:
             return None
 
-        opts = self.gl_widget.cameraParams()
-        dist = opts.get('distance', 1)
-        fov = opts.get('fov', 60)
-        near = dist * 0.001
-        far = dist * 1000.0
-        aspect = w / h
+        try:
+            self.gl_widget.makeCurrent()
+            from OpenGL.GL import glGetDoublev, GL_MODELVIEW_MATRIX, GL_PROJECTION_MATRIX
+            # OpenGL returns column-major, transpose to row-major for numpy
+            vm = np.array(glGetDoublev(GL_MODELVIEW_MATRIX), dtype=np.float64).reshape(4, 4).T
+            pm = np.array(glGetDoublev(GL_PROJECTION_MATRIX), dtype=np.float64).reshape(4, 4).T
+        except Exception:
+            return None
 
-        vm = _build_view_matrix(opts)
-        pm = _build_proj_matrix(fov, aspect, near, far)
         mvp = pm @ vm
 
         n = len(trans_pts)
@@ -235,7 +185,7 @@ class View3D(QWidget):
 
         return screen_x, screen_y, valid
 
-    def _find_nearest_point(self, mx, my, max_dist=12.0):
+    def _find_nearest_point(self, mx, my, max_dist=20.0):
         if self._all_trans_flat is None or len(self._all_trans_flat) == 0:
             return None
 
