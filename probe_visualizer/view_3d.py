@@ -47,7 +47,11 @@ def _ev_pos(ev):
 
 
 class InteractiveGLWidget(gl.GLViewWidget):
-    """GLViewWidget with mouse tracking for hover and click."""
+    """GLViewWidget with mouse tracking for hover and click.
+
+    Click = right mouse button (left is used by GLViewWidget for orbit).
+    Hover = any mouse move with tracking enabled.
+    """
 
     hover_moved = pyqtSignal(object)
     point_clicked = pyqtSignal(object)
@@ -55,30 +59,16 @@ class InteractiveGLWidget(gl.GLViewWidget):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.setMouseTracking(True)
-        self._press_x = None
-        self._press_y = None
-
-    def mousePressEvent(self, ev):
-        if ev.button() == Qt.LeftButton:
-            p = _ev_pos(ev)
-            self._press_x = p.x()
-            self._press_y = p.y()
-        super().mousePressEvent(ev)
 
     def mouseMoveEvent(self, ev):
         self.hover_moved.emit(_ev_pos(ev))
         super().mouseMoveEvent(ev)
 
-    def mouseReleaseEvent(self, ev):
-        if ev.button() == Qt.LeftButton and self._press_x is not None:
-            p = _ev_pos(ev)
-            dx = abs(p.x() - self._press_x)
-            dy = abs(p.y() - self._press_y)
-            if dx < 5 and dy < 5:
-                self.point_clicked.emit(p)
-        self._press_x = None
-        self._press_y = None
-        super().mouseReleaseEvent(ev)
+    def mouseDoubleClickEvent(self, ev):
+        """Double-click left button to select a point."""
+        if ev.button() == Qt.LeftButton:
+            self.point_clicked.emit(_ev_pos(ev))
+        super().mouseDoubleClickEvent(ev)
 
 
 class View3D(QWidget):
