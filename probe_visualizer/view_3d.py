@@ -51,29 +51,29 @@ class InteractiveGLWidget(gl.GLViewWidget):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self._view_locked = True  # default: camera frozen
+        # Default: full pyqtgraph navigation (left = orbit, middle = pan,
+        # wheel = zoom). When pan_mode is enabled via the "Change view"
+        # checkbox, left-drag acts like middle-drag (pan only, no rotation).
+        self._pan_mode = False
         self._pan_last_pos = None
 
-    def set_view_locked(self, locked: bool):
-        self._view_locked = locked
+    def set_pan_mode(self, enabled: bool):
+        self._pan_mode = enabled
         self._pan_last_pos = None
 
     def mousePressEvent(self, ev):
-        if self._view_locked:
-            ev.accept()
-            return
-        if ev.button() == Qt.LeftButton:
-            # Emulate middle-mouse pan: start tracking delta from this point.
+        if self._pan_mode and ev.button() == Qt.LeftButton:
             self._pan_last_pos = _ev_pos(ev)
             ev.accept()
             return
         super().mousePressEvent(ev)
 
     def mouseMoveEvent(self, ev):
-        if self._view_locked:
-            ev.accept()
-            return
-        if (ev.buttons() & Qt.LeftButton) and self._pan_last_pos is not None:
+        if (
+            self._pan_mode
+            and (ev.buttons() & Qt.LeftButton)
+            and self._pan_last_pos is not None
+        ):
             pos = _ev_pos(ev)
             diff = pos - self._pan_last_pos
             self._pan_last_pos = pos
@@ -82,12 +82,6 @@ class InteractiveGLWidget(gl.GLViewWidget):
             ev.accept()
             return
         super().mouseMoveEvent(ev)
-
-    def wheelEvent(self, ev):
-        if self._view_locked:
-            ev.accept()
-            return
-        super().wheelEvent(ev)
 
     def mouseDoubleClickEvent(self, ev):
         if ev.button() == Qt.LeftButton:
@@ -377,7 +371,7 @@ class View3D(QWidget):
             self._draw_fast()
 
     def _on_change_view_toggled(self):
-        self.gl_widget.set_view_locked(not self.change_view_check.isChecked())
+        self.gl_widget.set_pan_mode(self.change_view_check.isChecked())
 
     # === PUBLIC API ===
 
