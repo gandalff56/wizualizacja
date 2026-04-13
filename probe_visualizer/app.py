@@ -195,8 +195,7 @@ class MainWindow(QMainWindow):
         self.plate_info = QLabel("No data loaded")
         self.plate_info.setWordWrap(True)
         self.plate_info.setStyleSheet(
-            "background-color: #2a2a2a; color: #ddd; padding: 8px; "
-            "border-radius: 4px; font-family: monospace; font-size: 11px;"
+            "padding: 4px; font-family: monospace; font-size: 11px;"
         )
         stats_layout.addWidget(self.plate_info)
         stats_layout.addStretch()
@@ -272,7 +271,39 @@ class MainWindow(QMainWindow):
             self.plate_info.setText("Not enough sides for plate calculation")
             return
 
+        self.plate_info.setText(self._format_plate_dims(dims))
+
+        # Update popup window if open
+        if self._stats_dialog is not None and self._stats_dialog.isVisible():
+            self._populate_stats_dialog()
+
+    def _format_plate_dims(self, dims):
+        """Build the multi-line text for the Plate Dimensions panel.
+
+        Handles both shapes returned by `ProbeData.plate_dimensions()`:
+        `rectangle` (can) and `cone`.
+        """
         lines = []
+        shape = dims.get("shape", "rectangle")
+
+        if shape == "cone":
+            lines.append("Shape:      Cone (curved)")
+            lines.append(f"Chord 1:    {dims['chord1']:.1f} mm"
+                         f"  ({dims.get('chord1_side', '')})")
+            lines.append(f"Chord 2:    {dims['chord2']:.1f} mm"
+                         f"  ({dims.get('chord2_side', '')})")
+            lines.append(f"Chord W:    {dims['chord_w']:.1f} mm")
+            lines.append(f"Angle:      {dims['angle_deg']:.2f} deg")
+            lines.append("")
+            lines.append("Side lengths:")
+            side_names = [s.name for s in self.data.sides]
+            for i, length in enumerate(dims["side_lengths"]):
+                name = side_names[i] if i < len(side_names) else f"Side {i}"
+                lines.append(f"  {name}: {length:.1f} mm")
+            return "\n".join(lines)
+
+        # Rectangle (can)
+        lines.append("Shape:      Can (rectangular)")
         lines.append(f"Width:      {dims['width']:.1f} mm")
         lines.append(f"Length:     {dims['length']:.1f} mm")
         lines.append(f"Angle:      {dims['angle_deg']:.2f} deg")
@@ -283,18 +314,13 @@ class MainWindow(QMainWindow):
             name = side_names[i] if i < len(side_names) else f"Side {i}"
             lines.append(f"  {name}: {length:.1f} mm")
 
-        if dims["diagonal_1"] > 0:
+        if dims.get("diagonal_1", 0) > 0:
             lines.append("")
             lines.append(f"Diagonal 1: {dims['diagonal_1']:.1f} mm")
             lines.append(f"Diagonal 2: {dims['diagonal_2']:.1f} mm")
             diff = abs(dims["diagonal_1"] - dims["diagonal_2"])
             lines.append(f"Diag diff:  {diff:.1f} mm")
-
-        self.plate_info.setText("\n".join(lines))
-
-        # Update popup window if open
-        if self._stats_dialog is not None and self._stats_dialog.isVisible():
-            self._populate_stats_dialog()
+        return "\n".join(lines)
 
     def _open_stats_window(self):
         if self._stats_dialog is None:
@@ -319,8 +345,7 @@ class MainWindow(QMainWindow):
             self._dlg_plate_info = QLabel("No data loaded")
             self._dlg_plate_info.setWordWrap(True)
             self._dlg_plate_info.setStyleSheet(
-                "background-color: #2a2a2a; color: #ddd; padding: 10px; "
-                "border-radius: 4px; font-family: monospace; font-size: 12px;"
+                "padding: 6px; font-family: monospace; font-size: 12px;"
             )
             layout.addWidget(self._dlg_plate_info)
 

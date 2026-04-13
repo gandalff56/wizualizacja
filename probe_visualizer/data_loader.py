@@ -163,11 +163,34 @@ class ProbeData:
             })
         return stats
 
+    @staticmethod
+    def _is_side_curved(side):
+        """Return True if the side's points deviate noticeably from a straight
+        line between its first and last point (i.e. the side is an arc)."""
+        pts = side.points[:, :2]
+        n = len(pts)
+        if n < 4:
+            return False
+        p0 = pts[0]
+        chord = pts[-1] - p0
+        chord_len = float(np.linalg.norm(chord))
+        if chord_len < 1e-9:
+            return False
+        diffs = pts - p0
+        # Perpendicular distance from each point to the chord line.
+        cross = np.abs(diffs[:, 0] * chord[1] - diffs[:, 1] * chord[0])
+        max_dev = float(cross.max() / chord_len)
+        # Curved if any point deviates > 1% of chord length AND > 2 mm.
+        return max_dev > max(chord_len * 0.01, 2.0)
+
     def plate_dimensions(self):
         """Calculate plate dimensions and rotation angle.
 
         Uses corner points (first point of each side) to determine
         plate geometry. The plate may be rotated relative to machine axes.
+
+        Returns a dict with `shape` = "rectangle" or "cone" and the
+        appropriate fields for that shape.
         """
         if len(self.sides) < 2:
             return None
@@ -194,7 +217,36 @@ class ProbeData:
         else:
             angle_deg = 0.0
 
-        # For 4-sided plate: width = avg of sides 0,2; length = avg of sides 1,3
+        # Cone detection: 4 sides, and the two longest are curved arcs.
+        if n == 4:
+            # Span of each side = distance between its first and last point
+            spans = [
+                float(np.linalg.norm(s.points[-1, :2] - s.points[0, :2]))
+                for s in self.sides
+            ]
+            order = sorted(range(4), key=lambda i: -spans[i])
+            a1, a2 = order[0], order[1]
+            s1, s2 = order[2], order[3]
+            if (
+                self._is_side_curved(self.sides[a1])
+                and self._is_side_curved(self.sides[a2])
+            ):
+                chord_w = (spans[s1] + spans[s2]) / 2.0
+                return {
+                    "shape": "cone",
+                    "chord1": spans[a1],
+                    "chord2": spans[a2],
+                    "chord_w": chord_w,
+                    "chord1_side": self.sides[a1].name,
+                    "chord2_side": self.sides[a2].name,
+                    "w_side_1": self.sides[s1].name,
+                    "w_side_2": self.sides[s2].name,
+                    "angle_deg": angle_deg,
+                    "corners": corners,
+                    "side_lengths": side_lengths,
+                }
+
+        # Rectangle plate
         if n == 4:
             width = (side_lengths[0] + side_lengths[2]) / 2.0
             length = (side_lengths[1] + side_lengths[3]) / 2.0
@@ -206,6 +258,7 @@ class ProbeData:
             diag1 = diag2 = 0
 
         return {
+            "shape": "rectangle",
             "corners": corners,
             "side_lengths": side_lengths,
             "width": width,
