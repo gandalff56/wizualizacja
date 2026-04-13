@@ -194,22 +194,22 @@ class ProbeData:
         else:
             angle_deg = 0.0
 
-        # For 4-sided plate: width = avg of sides 0,2; height = avg of sides 1,3
+        # For 4-sided plate: width = avg of sides 0,2; length = avg of sides 1,3
         if n == 4:
             width = (side_lengths[0] + side_lengths[2]) / 2.0
-            height = (side_lengths[1] + side_lengths[3]) / 2.0
+            length = (side_lengths[1] + side_lengths[3]) / 2.0
             diag1 = float(np.linalg.norm(corners[2] - corners[0]))
             diag2 = float(np.linalg.norm(corners[3] - corners[1]))
         else:
             width = side_lengths[0] if side_lengths else 0
-            height = side_lengths[1] if len(side_lengths) > 1 else 0
+            length = side_lengths[1] if len(side_lengths) > 1 else 0
             diag1 = diag2 = 0
 
         return {
             "corners": corners,
             "side_lengths": side_lengths,
             "width": width,
-            "height": height,
+            "length": length,
             "angle_deg": angle_deg,
             "diagonal_1": diag1,
             "diagonal_2": diag2,

@@ -267,7 +267,7 @@ class MainWindow(QMainWindow):
 
         lines = []
         lines.append(f"Width:      {dims['width']:.1f} mm")
-        lines.append(f"Height:     {dims['height']:.1f} mm")
+        lines.append(f"Length:     {dims['length']:.1f} mm")
         lines.append(f"Angle:      {dims['angle_deg']:.2f} deg")
         lines.append("")
         lines.append("Side lengths:")
