@@ -3,3 +3,8 @@ __pycache__/
 *.pyc
 build/
 *.spec
+<<<<<<< Updated upstream
+dist/ProbeVisualizer.exe
+=======
+dist/
+>>>>>>> Stashed changes
