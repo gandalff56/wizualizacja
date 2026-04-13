@@ -52,18 +52,33 @@ class InteractiveGLWidget(gl.GLViewWidget):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self._view_locked = True  # default: camera frozen
+        self._pan_last_pos = None
 
     def set_view_locked(self, locked: bool):
         self._view_locked = locked
+        self._pan_last_pos = None
 
     def mousePressEvent(self, ev):
         if self._view_locked:
+            ev.accept()
+            return
+        if ev.button() == Qt.LeftButton:
+            # Emulate middle-mouse pan: start tracking delta from this point.
+            self._pan_last_pos = _ev_pos(ev)
             ev.accept()
             return
         super().mousePressEvent(ev)
 
     def mouseMoveEvent(self, ev):
         if self._view_locked:
+            ev.accept()
+            return
+        if (ev.buttons() & Qt.LeftButton) and self._pan_last_pos is not None:
+            pos = _ev_pos(ev)
+            diff = pos - self._pan_last_pos
+            self._pan_last_pos = pos
+            # Same call pyqtgraph's GLViewWidget uses for middle-button drag.
+            self.pan(diff.x(), diff.y(), 0, relative="view-upright")
             ev.accept()
             return
         super().mouseMoveEvent(ev)
@@ -80,6 +95,8 @@ class InteractiveGLWidget(gl.GLViewWidget):
         super().mouseDoubleClickEvent(ev)
 
     def mouseReleaseEvent(self, ev):
+        if ev.button() == Qt.LeftButton:
+            self._pan_last_pos = None
         if ev.button() == Qt.RightButton:
             self.point_clicked.emit(_ev_pos(ev))
         super().mouseReleaseEvent(ev)
