@@ -1,10 +1,11 @@
 import os
+import numpy as np
 from PyQt5.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QStackedWidget,
     QComboBox, QCheckBox, QGroupBox, QPushButton, QFileDialog,
     QMessageBox, QStatusBar, QAction, QLabel, QScrollArea,
     QDoubleSpinBox, QTabWidget, QTableWidget, QTableWidgetItem,
-    QHeaderView, QDialog, QInputDialog, QLineEdit,
+    QHeaderView, QDialog, QInputDialog, QLineEdit, QFormLayout,
 )
 from PyQt5.QtCore import Qt, QTimer, QSettings
 from PyQt5.QtGui import QKeySequence
@@ -31,6 +32,12 @@ class MainWindow(QMainWindow):
         self._edit_tab_index = -1
         self._stats_tab_index = -1
         self._last_right_tab = 0
+
+        # CNC live connection state
+        self._cnc_client = None
+        self._cnc_timer = QTimer(self)
+        self._cnc_timer.setInterval(100)   # 10 Hz poll
+        self._cnc_timer.timeout.connect(self._poll_cnc)
 
         self._setup_menu()
         self._setup_ui_shell()
@@ -78,6 +85,10 @@ class MainWindow(QMainWindow):
         open_btn = QPushButton("Open File")
         open_btn.clicked.connect(self._open_file)
         toolbar.addWidget(open_btn)
+
+        self.cnc_btn = QPushButton("Connect CNC")
+        self.cnc_btn.clicked.connect(self._on_cnc_button)
+        toolbar.addWidget(self.cnc_btn)
 
         toolbar.addWidget(QLabel("View:"))
         self.view_combo = QComboBox()
@@ -483,6 +494,131 @@ class MainWindow(QMainWindow):
 
     def _on_view_changed(self, index):
         self.stack.setCurrentIndex(index)
+
+    # === CNC live connection ===
+
+    def _on_cnc_button(self):
+        if self._cnc_client and self._cnc_client.is_connected():
+            self._disconnect_cnc()
+            return
+        if not self._views_ready:
+            QMessageBox.information(
+                self, "Please wait", "Views are still loading..."
+            )
+            return
+
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Connect to Fanuc CNC")
+        form = QFormLayout(dlg)
+        ip_edit = QLineEdit(
+            self.settings.value("cnc_ip", "192.168.1.1", type=str)
+        )
+        port_edit = QLineEdit(
+            str(self.settings.value("cnc_port", 8193, type=int))
+        )
+        form.addRow("IP address:", ip_edit)
+        form.addRow("Port:", port_edit)
+
+        ok_btn = QPushButton("Connect")
+        mock_btn = QPushButton("Use mock (test)")
+        cancel_btn = QPushButton("Cancel")
+        row = QHBoxLayout()
+        row.addWidget(ok_btn)
+        row.addWidget(mock_btn)
+        row.addWidget(cancel_btn)
+        form.addRow(row)
+
+        dlg._use_mock = False
+        ok_btn.clicked.connect(dlg.accept)
+        def _mock_clicked():
+            dlg._use_mock = True
+            dlg.accept()
+        mock_btn.clicked.connect(_mock_clicked)
+        cancel_btn.clicked.connect(dlg.reject)
+
+        if dlg.exec_() != QDialog.Accepted:
+            return
+
+        from probe_visualizer.cnc_client import (
+            FanucFocasClient, MockCNCClient,
+        )
+        if dlg._use_mock:
+            client = MockCNCClient()
+        else:
+            ip = ip_edit.text().strip()
+            try:
+                port = int(port_edit.text().strip() or "8193")
+            except ValueError:
+                QMessageBox.warning(self, "Invalid port", "Port must be a number")
+                return
+            self.settings.setValue("cnc_ip", ip)
+            self.settings.setValue("cnc_port", port)
+            client = FanucFocasClient(ip=ip, port=port)
+        self._connect_cnc(client)
+
+    def _connect_cnc(self, client):
+        try:
+            client.connect()
+        except Exception as e:
+            QMessageBox.critical(
+                self, "CNC error", f"Cannot connect:\n{e}"
+            )
+            return
+
+        self._cnc_client = client
+
+        from probe_visualizer.data_loader import ProbeData, SideData
+        if self.data is None:
+            self.data = ProbeData.empty_live_dataset()
+        else:
+            # Ensure a Live side exists but is empty to start fresh.
+            self.data.clear_live_side()
+            if not any(s.name == "Live" for s in self.data.sides):
+                self.data.sides.append(
+                    SideData(
+                        name="Live",
+                        points=np.zeros((0, 3), dtype=float),
+                    )
+                )
+
+        self._rebuild_side_checks()
+        self.cnc_btn.setText("Disconnect CNC")
+        self.status_bar.showMessage(
+            f"CNC connected: {client.description}"
+        )
+        self._cnc_timer.start()
+
+    def _poll_cnc(self):
+        if not self._cnc_client or not self._cnc_client.is_connected():
+            return
+        try:
+            sample = self._cnc_client.read_sample()
+        except Exception as e:
+            self.status_bar.showMessage(f"CNC read error: {e}")
+            return
+        if sample is None:
+            return
+        self.data.append_live_point(sample.x, sample.y, sample.z)
+
+        self.view_3d.update_plot(
+            self.data, self.visible_sides, self.color_mode,
+            preserve_camera=True,
+        )
+        self.view_2d.update_plot(
+            self.data, self.visible_sides, self.color_mode
+        )
+        self._update_statistics()
+
+    def _disconnect_cnc(self):
+        self._cnc_timer.stop()
+        if self._cnc_client is not None:
+            try:
+                self._cnc_client.disconnect()
+            except Exception:
+                pass
+        self._cnc_client = None
+        self.cnc_btn.setText("Connect CNC")
+        self.status_bar.showMessage("CNC disconnected")
 
     def _on_right_tab_changed(self, idx):
         if idx == self._edit_tab_index and not self._edit_unlocked:

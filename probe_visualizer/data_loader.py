@@ -132,8 +132,35 @@ class ProbeData:
     def all_points(self):
         return np.vstack([s.points for s in self.sides])
 
+    @classmethod
+    def empty_live_dataset(cls):
+        """Return an empty dataset containing a single writable 'Live' side."""
+        sides = [SideData(name="Live", points=np.zeros((0, 3), dtype=float))]
+        return cls(sides, format_name="Live")
+
+    def append_live_point(self, x, y, z):
+        """Append a single sample to the 'Live' side, creating it if needed."""
+        new_pt = np.array([[float(x), float(y), float(z)]], dtype=float)
+        for side in self.sides:
+            if side.name == "Live":
+                if len(side.points):
+                    side.points = np.vstack([side.points, new_pt])
+                else:
+                    side.points = new_pt
+                return
+        self.sides.append(SideData(name="Live", points=new_pt))
+
+    def clear_live_side(self):
+        """Drop all points from the 'Live' side without removing it."""
+        for side in self.sides:
+            if side.name == "Live":
+                side.points = np.zeros((0, 3), dtype=float)
+                return
+
     def z_range(self):
         all_pts = self.all_points()
+        if len(all_pts) == 0:
+            return 0.0, 0.0
         return float(all_pts[:, 2].min()), float(all_pts[:, 2].max())
 
     def total_point_count(self):
@@ -143,11 +170,21 @@ class ProbeData:
         """Return per-side statistics: Z min/max/avg/std, point count, XY path length."""
         stats = []
         for side in self.sides:
+            if len(side.points) == 0:
+                stats.append({
+                    "name": side.name,
+                    "count": 0,
+                    "z_min": 0.0,
+                    "z_max": 0.0,
+                    "z_avg": 0.0,
+                    "z_std": 0.0,
+                    "path_length": 0.0,
+                    "span": 0.0,
+                })
+                continue
             z = side.points[:, 2]
-            # XY path length (sum of euclidean distances between consecutive points)
             diffs = np.diff(side.points[:, :2], axis=0)
             path_len = float(np.sum(np.linalg.norm(diffs, axis=1)))
-            # Side span: distance from first to last point in XY
             span = float(np.linalg.norm(
                 side.points[-1, :2] - side.points[0, :2]
             ))

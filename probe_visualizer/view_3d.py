@@ -198,6 +198,11 @@ class View3D(QWidget):
         self._cached_max_span = None
         self._cached_z_range = None
         self._data_version = 0
+        # Whether the camera has been positioned at least once for the
+        # current dataset. When False the next _draw_fast() will frame the
+        # scene. When True, redraws leave the camera untouched so live
+        # updates don't jerk the view.
+        self._camera_initialized = False
 
     # === PROJECTION (using pyqtgraph's own matrix methods) ===
 
@@ -358,13 +363,15 @@ class View3D(QWidget):
 
     # === PUBLIC API ===
 
-    def update_plot(self, data, visible_sides, color_mode):
+    def update_plot(self, data, visible_sides, color_mode, preserve_camera=False):
         self.data = data
         self.visible_sides = visible_sides
         self.color_mode = color_mode
         self._selected_side_idx = -1
         self._selected_pt_idx = -1
         self._invalidate_cache()
+        if not preserve_camera:
+            self._camera_initialized = False
         self._draw_full()
 
     def update_selected_point(self, side_idx, pt_idx, x, y, z):
@@ -392,13 +399,19 @@ class View3D(QWidget):
 
     def _compute_geometry_cache(self):
         all_pts = self.data.all_points()
+        if len(all_pts) == 0:
+            # Empty live dataset before any samples have arrived.
+            self._cached_center = None
+            self._cached_max_span = None
+            self._cached_z_range = None
+            return
         cx = (all_pts[:, 0].min() + all_pts[:, 0].max()) / 2.0
         cy = (all_pts[:, 1].min() + all_pts[:, 1].max()) / 2.0
         cz = (all_pts[:, 2].min() + all_pts[:, 2].max()) / 2.0
         span_x = all_pts[:, 0].max() - all_pts[:, 0].min()
         span_y = all_pts[:, 1].max() - all_pts[:, 1].min()
         self._cached_center = (cx, cy, cz)
-        self._cached_max_span = max(span_x, span_y)
+        self._cached_max_span = max(span_x, span_y, 1.0)
         self._cached_z_range = (float(all_pts[:, 2].min()), float(all_pts[:, 2].max()))
 
     def _compute_delaunay_cache(self, xy):
@@ -557,7 +570,12 @@ class View3D(QWidget):
         grid.setSpacing(max_span / 20, max_span / 20, 1)
         grid.translate(0, 0, (z_min - cz) * z_scale - 10)
         self._add_item(grid)
-        self.gl_widget.setCameraPosition(distance=max_span * 0.8)
+        # Only frame the scene the first time after a full (non-preserving)
+        # update_plot — subsequent redraws leave the camera alone so live
+        # sample updates don't reset the user's orbit/zoom.
+        if not self._camera_initialized:
+            self.gl_widget.setCameraPosition(distance=max_span * 0.8)
+            self._camera_initialized = True
         self._update_highlight()
 
     def _draw_arrow(self, pts):
