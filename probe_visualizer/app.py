@@ -305,6 +305,14 @@ class MainWindow(QMainWindow):
                          f"  ({dims.get('chord2_side', '')})")
             lines.append(f"Chord W:    {dims['chord_w']:.1f} mm")
             lines.append(f"Angle:      {dims['angle_deg']:.2f} deg")
+            # Level (tilt from horizontal) of each chord — 0 deg = perfectly
+            # flat, non-zero means the plate is sitting skewed.
+            lines.append(
+                f"Chord 1 lvl:{dims.get('chord1_tilt_deg', 0.0):+.2f} deg"
+            )
+            lines.append(
+                f"Chord 2 lvl:{dims.get('chord2_tilt_deg', 0.0):+.2f} deg"
+            )
             lines.append("")
             lines.append("Side lengths:")
             side_names = [s.name for s in self.data.sides]

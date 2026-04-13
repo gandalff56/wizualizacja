@@ -201,6 +201,26 @@ class ProbeData:
         return stats
 
     @staticmethod
+    def _chord_tilt_deg(side):
+        """Angle (degrees) of the chord from first to last point of a side,
+        relative to the horizontal (XY) plane.
+
+        Returns positive values when the end of the chord sits higher in Z
+        than the start, negative when it sits lower. 0 means the chord is
+        perfectly level.
+        """
+        pts = side.points
+        if len(pts) < 2:
+            return 0.0
+        dx = float(pts[-1, 0] - pts[0, 0])
+        dy = float(pts[-1, 1] - pts[0, 1])
+        dz = float(pts[-1, 2] - pts[0, 2])
+        horiz = float(np.hypot(dx, dy))
+        if horiz < 1e-9:
+            return 0.0
+        return float(np.degrees(np.arctan2(dz, horiz)))
+
+    @staticmethod
     def _is_side_curved(side):
         """Return True if the side's points deviate noticeably from a straight
         line between its first and last point (i.e. the side is an arc)."""
@@ -269,6 +289,12 @@ class ProbeData:
                 and self._is_side_curved(self.sides[a2])
             ):
                 chord_w = (spans[s1] + spans[s2]) / 2.0
+                # Tilt of each chord relative to horizontal (the XY plane).
+                # For a perfectly level plate both endpoints of the arc lie
+                # at the same Z and the tilt is 0 deg. Positive tilt means
+                # the chord end is higher than the start.
+                chord1_tilt = self._chord_tilt_deg(self.sides[a1])
+                chord2_tilt = self._chord_tilt_deg(self.sides[a2])
                 return {
                     "shape": "cone",
                     "chord1": spans[a1],
@@ -278,6 +304,8 @@ class ProbeData:
                     "chord2_side": self.sides[a2].name,
                     "w_side_1": self.sides[s1].name,
                     "w_side_2": self.sides[s2].name,
+                    "chord1_tilt_deg": chord1_tilt,
+                    "chord2_tilt_deg": chord2_tilt,
                     "angle_deg": angle_deg,
                     "corners": corners,
                     "side_lengths": side_lengths,
