@@ -4,7 +4,7 @@ from PyQt5.QtWidgets import (
     QComboBox, QCheckBox, QGroupBox, QPushButton, QFileDialog,
     QMessageBox, QStatusBar, QAction, QLabel, QScrollArea,
     QDoubleSpinBox, QTabWidget, QTableWidget, QTableWidgetItem,
-    QHeaderView, QDialog,
+    QHeaderView, QDialog, QInputDialog, QLineEdit,
 )
 from PyQt5.QtCore import Qt, QTimer
 from PyQt5.QtGui import QKeySequence
@@ -25,6 +25,10 @@ class MainWindow(QMainWindow):
         self._editing = False
         self._views_ready = False
         self._stats_dialog = None
+        self._edit_unlocked = False
+        self._edit_tab_index = -1
+        self._stats_tab_index = -1
+        self._last_right_tab = 0
 
         self._setup_menu()
         self._setup_ui_shell()
@@ -75,7 +79,7 @@ class MainWindow(QMainWindow):
 
         toolbar.addWidget(QLabel("View:"))
         self.view_combo = QComboBox()
-        self.view_combo.addItems(["2D", "3D"])
+        self.view_combo.addItems(["3D", "2D"])
         self.view_combo.currentIndexChanged.connect(self._on_view_changed)
         toolbar.addWidget(self.view_combo)
 
@@ -121,8 +125,11 @@ class MainWindow(QMainWindow):
         # Right panel with tabs (lightweight - build now)
         self.right_tabs = QTabWidget()
         self.right_tabs.setFixedWidth(300)
-        self._build_edit_tab()
         self._build_stats_tab()
+        self._build_edit_tab()
+        self.right_tabs.setCurrentIndex(self._stats_tab_index)
+        self._last_right_tab = self.right_tabs.currentIndex()
+        self.right_tabs.currentChanged.connect(self._on_right_tab_changed)
         self._content_layout.addWidget(self.right_tabs)
 
         main_layout.addLayout(self._content_layout, stretch=1)
@@ -159,7 +166,7 @@ class MainWindow(QMainWindow):
         edit_layout.addWidget(save_as_btn)
 
         edit_layout.addStretch()
-        self.right_tabs.addTab(edit_tab, "Edit Point")
+        self._edit_tab_index = self.right_tabs.addTab(edit_tab, "Edit Point")
 
     def _build_stats_tab(self):
         stats_tab = QWidget()
@@ -191,7 +198,7 @@ class MainWindow(QMainWindow):
         )
         stats_layout.addWidget(self.plate_info)
         stats_layout.addStretch()
-        self.right_tabs.addTab(stats_tab, "Statistics")
+        self._stats_tab_index = self.right_tabs.addTab(stats_tab, "Statistics")
 
     def _init_views_deferred(self):
         """Create heavy view widgets after the window is already visible."""
@@ -202,10 +209,11 @@ class MainWindow(QMainWindow):
         self.stack.removeWidget(self._loading_label)
         self._loading_label.deleteLater()
 
-        self.view_2d = View2D()
         self.view_3d = View3D()
-        self.stack.addWidget(self.view_2d)
+        self.view_2d = View2D()
         self.stack.addWidget(self.view_3d)
+        self.stack.addWidget(self.view_2d)
+        self.stack.setCurrentWidget(self.view_3d)
 
         # Connect point selection from both views
         self.view_2d.point_selected.connect(self._on_point_selected)
@@ -435,6 +443,26 @@ class MainWindow(QMainWindow):
 
     def _on_view_changed(self, index):
         self.stack.setCurrentIndex(index)
+
+    def _on_right_tab_changed(self, idx):
+        if idx == self._edit_tab_index and not self._edit_unlocked:
+            pw, ok = QInputDialog.getText(
+                self, "Edit Point locked",
+                "Enter password:", QLineEdit.Password,
+            )
+            if ok and pw == "qwerx1231":
+                self._edit_unlocked = True
+                self._last_right_tab = idx
+                return
+            if ok:
+                QMessageBox.warning(
+                    self, "Wrong password", "Incorrect password."
+                )
+            self.right_tabs.blockSignals(True)
+            self.right_tabs.setCurrentIndex(self._last_right_tab)
+            self.right_tabs.blockSignals(False)
+            return
+        self._last_right_tab = idx
 
     def _on_color_changed(self, index):
         self.color_mode = "side" if index == 0 else "z"

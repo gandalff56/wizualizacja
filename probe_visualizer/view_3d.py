@@ -1,6 +1,7 @@
 import numpy as np
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QSlider, QCheckBox,
+    QDoubleSpinBox,
 )
 from PyQt5.QtCore import Qt, pyqtSignal, QTimer
 
@@ -48,6 +49,31 @@ def _ev_pos(ev):
 class InteractiveGLWidget(gl.GLViewWidget):
     point_clicked = pyqtSignal(object)
 
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._view_locked = True  # default: camera frozen
+
+    def set_view_locked(self, locked: bool):
+        self._view_locked = locked
+
+    def mousePressEvent(self, ev):
+        if self._view_locked:
+            ev.accept()
+            return
+        super().mousePressEvent(ev)
+
+    def mouseMoveEvent(self, ev):
+        if self._view_locked:
+            ev.accept()
+            return
+        super().mouseMoveEvent(ev)
+
+    def wheelEvent(self, ev):
+        if self._view_locked:
+            ev.accept()
+            return
+        super().wheelEvent(ev)
+
     def mouseDoubleClickEvent(self, ev):
         if ev.button() == Qt.LeftButton:
             self.point_clicked.emit(_ev_pos(ev))
@@ -91,6 +117,14 @@ class View3D(QWidget):
         self.z_scale_slider.valueChanged.connect(self._on_z_scale_changed)
         self.z_label = QLabel("1.0x")
 
+        # Y scale slider (1.0x - 5.0x)
+        self.y_scale_slider = QSlider(Qt.Horizontal)
+        self.y_scale_slider.setMinimum(10)
+        self.y_scale_slider.setMaximum(50)
+        self.y_scale_slider.setValue(10)
+        self.y_scale_slider.valueChanged.connect(self._on_y_scale_changed)
+        self.y_label = QLabel("1.0x")
+
         # Point size slider
         self.pt_size_slider = QSlider(Qt.Horizontal)
         self.pt_size_slider.setMinimum(1)
@@ -100,24 +134,40 @@ class View3D(QWidget):
         self.pt_label = QLabel("4")
 
         # Checkboxes
-        self.surface_check = QCheckBox("Surface")
-        self.surface_check.setChecked(False)
-        self.surface_check.stateChanged.connect(self._on_surface_toggled)
+        self.fill_check = QCheckBox("Fill")
+        self.fill_check.setChecked(False)
+        self.fill_check.stateChanged.connect(self._on_fill_toggled)
+        self.thickness_spin = QDoubleSpinBox()
+        self.thickness_spin.setDecimals(1)
+        self.thickness_spin.setRange(0.1, 100000.0)
+        self.thickness_spin.setValue(80.0)
+        self.thickness_spin.setSingleStep(5.0)
+        self.thickness_spin.setPrefix("thk ")
+        self.thickness_spin.valueChanged.connect(self._on_fill_toggled)
         self.arrows_check = QCheckBox("Arrows")
         self.arrows_check.setChecked(True)
         self.arrows_check.stateChanged.connect(self._on_arrows_toggled)
+        self.change_view_check = QCheckBox("Change view")
+        self.change_view_check.setChecked(False)
+        self.change_view_check.stateChanged.connect(self._on_change_view_toggled)
 
         controls = QHBoxLayout()
         controls.addWidget(QLabel("Z Scale:"))
         controls.addWidget(self.z_scale_slider)
         controls.addWidget(self.z_label)
-        controls.addSpacing(15)
+        controls.addSpacing(10)
+        controls.addWidget(QLabel("Y Scale:"))
+        controls.addWidget(self.y_scale_slider)
+        controls.addWidget(self.y_label)
+        controls.addSpacing(10)
         controls.addWidget(QLabel("Point Size:"))
         controls.addWidget(self.pt_size_slider)
         controls.addWidget(self.pt_label)
-        controls.addSpacing(15)
+        controls.addSpacing(10)
         controls.addWidget(self.arrows_check)
-        controls.addWidget(self.surface_check)
+        controls.addWidget(self.fill_check)
+        controls.addWidget(self.thickness_spin)
+        controls.addWidget(self.change_view_check)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -289,18 +339,28 @@ class View3D(QWidget):
         if self.data is not None:
             self._draw_fast()
 
+    def _on_y_scale_changed(self, value):
+        self.y_label.setText(f"{value / 10.0:.1f}x")
+        if self.data is not None:
+            # Y affects the XY Delaunay triangulation, invalidate cache
+            self._invalidate_cache()
+            self._draw_full()
+
     def _on_pt_size_changed(self, value):
         self.pt_label.setText(str(value))
         if self.data is not None:
             self._draw_fast()
 
-    def _on_surface_toggled(self):
+    def _on_fill_toggled(self):
         if self.data is not None:
             self._draw_fast()
 
     def _on_arrows_toggled(self):
         if self.data is not None:
             self._draw_fast()
+
+    def _on_change_view_toggled(self):
+        self.gl_widget.set_view_locked(not self.change_view_check.isChecked())
 
     # === PUBLIC API ===
 
@@ -418,12 +478,13 @@ class View3D(QWidget):
         max_span = self._cached_max_span
         z_min, z_max = self._cached_z_range
         z_scale = self.z_scale_slider.value() / 10.0
+        y_scale = self.y_scale_slider.value() / 10.0
         pt_size = self.pt_size_slider.value()
         show_arrows = self.arrows_check.isChecked()
-        show_surface = self.surface_check.isChecked()
-        if show_surface and _get_delaunay() is None:
-            show_surface = False
-            self.surface_check.setChecked(False)
+        show_fill = self.fill_check.isChecked()
+        if show_fill and _get_delaunay() is None:
+            show_fill = False
+            self.fill_check.setChecked(False)
         z_range = z_max - z_min if z_max - z_min > 1e-9 else 1.0
         cmap = _get_cmap()
 
@@ -437,7 +498,7 @@ class View3D(QWidget):
                 continue
             pts = side.points.copy()
             pts[:, 0] -= cx
-            pts[:, 1] -= cy
+            pts[:, 1] = (pts[:, 1] - cy) * y_scale
             pts[:, 2] = (pts[:, 2] - cz) * z_scale
 
             self._point_map.append((i, side.name, side.points.copy(), pts.copy()))
@@ -477,11 +538,14 @@ class View3D(QWidget):
         else:
             self._all_trans_flat = None
 
-        if show_surface and all_trans_list:
+        if show_fill and all_trans_list:
             combined = np.vstack(all_trans_list)
             if self._cached_delaunay is None:
                 self._compute_delaunay_cache(combined[:, :2])
-            self._draw_surface(combined, z_min, z_max, z_scale, cz, cmap)
+            self._draw_fill(
+                combined, z_min, z_max, z_scale, cz, cmap,
+                thickness=self.thickness_spin.value(),
+            )
 
         grid = gl.GLGridItem()
         grid.setSize(max_span * 1.2, max_span * 1.2, 0)
@@ -509,15 +573,68 @@ class View3D(QWidget):
         lines = np.array([pts[j], tip, tip - d * hs + perp * hs * 0.5, tip, tip - d * hs - perp * hs * 0.5, tip])
         self._add_item(gl.GLLinePlotItem(pos=lines, color=(1, 1, 1, 0.8), width=2.0, antialias=True, mode="lines"))
 
-    def _draw_surface(self, combined, z_min, z_max, z_scale, cz, cmap):
+    def _draw_fill(self, combined, z_min, z_max, z_scale, cz, cmap, thickness):
         if self._cached_good_faces is None or len(self._cached_good_faces) == 0:
             return
-        z_range = z_max - z_min if z_max - z_min > 1e-9 else 1.0
         faces = self._cached_good_faces
-        avg_z = np.mean(combined[faces, 2], axis=1)
-        orig_z = avg_z / max(z_scale, 1e-10) + cz
-        z_norm = np.clip((orig_z - z_min) / z_range, 0, 1)
-        rgba = cmap(z_norm)
-        rgba[:, 3] = 0.4
-        md = gl.MeshData(vertexes=combined, faces=faces, faceColors=rgba)
-        self._add_item(gl.GLMeshItem(meshdata=md, smooth=True, shader="balloon", glOptions="translucent"))
+        n = len(combined)
+
+        # Top = current surface vertices. Bottom = same XY, Z offset downward.
+        # `combined[:, 2]` is in transformed (z_scale-multiplied) space, so the
+        # offset must be multiplied by z_scale too to stay in original Z units.
+        top = combined
+        bottom = top.copy()
+        bottom[:, 2] -= thickness * z_scale
+
+        verts = np.vstack([top, bottom])
+
+        top_faces = faces
+        bot_faces = faces[:, ::-1] + n
+
+        # Boundary edges of the triangulation: each boundary edge occurs in
+        # exactly one face, interior edges occur in two.
+        edges = np.vstack([
+            faces[:, [0, 1]],
+            faces[:, [1, 2]],
+            faces[:, [2, 0]],
+        ])
+        edges_sorted = np.sort(edges, axis=1)
+        _, inv, counts = np.unique(
+            edges_sorted, axis=0, return_inverse=True, return_counts=True
+        )
+        boundary_mask = counts[inv] == 1
+        boundary_edges = edges[boundary_mask]
+
+        a = boundary_edges[:, 0]
+        b = boundary_edges[:, 1]
+        side_tris_1 = np.column_stack([a, b, b + n])
+        side_tris_2 = np.column_stack([a, b + n, a + n])
+        side_faces = np.vstack([side_tris_1, side_tris_2])
+
+        all_faces = np.vstack([top_faces, bot_faces, side_faces])
+
+        # Colours: colormap on top, dimmed copy on bottom, neutral grey on sides
+        z_range = z_max - z_min if z_max - z_min > 1e-9 else 1.0
+        avg_z_top = np.mean(top[top_faces, 2], axis=1)
+        orig_z_top = avg_z_top / max(z_scale, 1e-10) + cz
+        rgba_top = cmap(np.clip((orig_z_top - z_min) / z_range, 0, 1))
+        rgba_top[:, 3] = 0.9
+
+        rgba_bot = rgba_top.copy()
+        rgba_bot[:, :3] *= 0.5
+        rgba_bot[:, 3] = 0.9
+
+        rgba_side = np.tile(
+            np.array([0.6, 0.6, 0.65, 0.9]), (len(side_faces), 1)
+        )
+
+        face_colors = np.vstack([rgba_top, rgba_bot, rgba_side])
+
+        md = gl.MeshData(
+            vertexes=verts, faces=all_faces, faceColors=face_colors
+        )
+        self._add_item(
+            gl.GLMeshItem(
+                meshdata=md, smooth=False, shader="shaded", glOptions="opaque"
+            )
+        )
