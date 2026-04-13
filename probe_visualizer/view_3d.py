@@ -145,7 +145,7 @@ class View3D(QWidget):
 
         # Checkboxes
         self.arrows_check = QCheckBox("Arrows")
-        self.arrows_check.setChecked(True)
+        self.arrows_check.setChecked(False)
         self.arrows_check.stateChanged.connect(self._on_arrows_toggled)
         self.change_view_check = QCheckBox("Change view")
         self.change_view_check.setChecked(False)
@@ -482,6 +482,7 @@ class View3D(QWidget):
         flat_trans, flat_orig = [], []
         flat_side_idx, flat_pt_idx = [], []
         flat_side_names = []
+        visible_order = []  # (side_idx, transformed_pts, orig_span) in draw order
 
         for i, side in enumerate(self.data.sides):
             if not self.visible_sides.get(side.name, True):
@@ -516,8 +517,31 @@ class View3D(QWidget):
                     pos=pts, color=cmap(z_norm), size=pt_size, pxMode=True
                 ))
 
-            if show_arrows and n > 1:
-                self._draw_arrow(pts)
+            # Record the side's own span (first → last point in original XY)
+            # for long/short classification when drawing arrows.
+            orig = side.points
+            span = float(np.linalg.norm(orig[-1, :2] - orig[0, :2])) if n > 1 else 0.0
+            visible_order.append((i, pts, span))
+
+        if show_arrows and visible_order:
+            # Classify visible sides by span: top half = long, bottom half = short.
+            spans_sorted = sorted((s for _, _, s in visible_order), reverse=True)
+            half = max(1, len(spans_sorted) // 2)
+            long_threshold = spans_sorted[half - 1]
+            long_drawn = False
+            short_drawn = False
+            for _, pts, span in visible_order:
+                if len(pts) < 2:
+                    continue
+                is_long = span >= long_threshold
+                if is_long and not long_drawn:
+                    self._draw_arrow(pts)
+                    long_drawn = True
+                elif not is_long and not short_drawn:
+                    self._draw_arrow(pts)
+                    short_drawn = True
+                if long_drawn and short_drawn:
+                    break
 
         if flat_trans:
             self._all_trans_flat = np.vstack(flat_trans)
