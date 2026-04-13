@@ -6,7 +6,7 @@ from PyQt5.QtWidgets import (
     QDoubleSpinBox, QTabWidget, QTableWidget, QTableWidgetItem,
     QHeaderView, QDialog, QInputDialog, QLineEdit,
 )
-from PyQt5.QtCore import Qt, QTimer
+from PyQt5.QtCore import Qt, QTimer, QSettings
 from PyQt5.QtGui import QKeySequence
 
 
@@ -15,6 +15,8 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle("Probe Data Visualizer")
         self.resize(1300, 800)
+
+        self.settings = QSettings("ProbeVisualizer", "ProbeVisualizer")
 
         self.data = None
         self.visible_sides = {}
@@ -221,6 +223,11 @@ class MainWindow(QMainWindow):
         self._views_ready = True
         self.status_bar.showMessage("Ready - open a JSON file to start")
 
+        # Auto-load the last opened file if it still exists
+        last_file = self.settings.value("last_file", "", type=str)
+        if last_file and os.path.isfile(last_file):
+            self._load_file(last_file)
+
     def _setup_statusbar(self):
         self.status_bar = QStatusBar()
         self.setStatusBar(self.status_bar)
@@ -347,13 +354,16 @@ class MainWindow(QMainWindow):
             )
             return
 
+        start_dir = self.settings.value("last_open_dir", "", type=str)
         path, _ = QFileDialog.getOpenFileName(
-            self, "Open Probe Data", "",
+            self, "Open Probe Data", start_dir,
             "JSON Files (*.json);;All Files (*)"
         )
         if not path:
             return
+        self._load_file(path)
 
+    def _load_file(self, path):
         from probe_visualizer.data_loader import ProbeData
         try:
             self.data = ProbeData.from_json_file(path)
@@ -362,6 +372,8 @@ class MainWindow(QMainWindow):
             return
 
         self._current_path = path
+        self.settings.setValue("last_open_dir", os.path.dirname(path))
+        self.settings.setValue("last_file", path)
         filename = os.path.basename(path)
         n_sides = len(self.data.sides)
         n_pts = self.data.total_point_count()
@@ -395,8 +407,9 @@ class MainWindow(QMainWindow):
     def _save_file_as(self):
         if self.data is None:
             return
+        start_dir = self.settings.value("last_open_dir", "", type=str)
         path, _ = QFileDialog.getSaveFileName(
-            self, "Save Probe Data As", "",
+            self, "Save Probe Data As", start_dir,
             "JSON Files (*.json);;All Files (*)"
         )
         if not path:
@@ -404,6 +417,8 @@ class MainWindow(QMainWindow):
         try:
             self.data.save_to_json_file(path)
             self._current_path = path
+            self.settings.setValue("last_open_dir", os.path.dirname(path))
+            self.settings.setValue("last_file", path)
             self.setWindowTitle(
                 f"Probe Data Visualizer - {os.path.basename(path)}"
             )
