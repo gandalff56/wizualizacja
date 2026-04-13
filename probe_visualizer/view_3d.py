@@ -499,9 +499,6 @@ class View3D(QWidget):
         pt_size = self.pt_size_slider.value()
         show_arrows = self.arrows_check.isChecked()
         show_fill = self.fill_check.isChecked()
-        if show_fill and _get_delaunay() is None:
-            show_fill = False
-            self.fill_check.setChecked(False)
         z_range = z_max - z_min if z_max - z_min > 1e-9 else 1.0
         cmap = _get_cmap()
 
@@ -557,10 +554,8 @@ class View3D(QWidget):
 
         if show_fill and all_trans_list:
             combined = np.vstack(all_trans_list)
-            if self._cached_delaunay is None:
-                self._compute_delaunay_cache(combined[:, :2])
             self._draw_fill(
-                combined, z_min, z_max, z_scale, cz, cmap,
+                combined, z_scale,
                 thickness=self.thickness_spin.value(),
             )
 
@@ -590,68 +585,61 @@ class View3D(QWidget):
         lines = np.array([pts[j], tip, tip - d * hs + perp * hs * 0.5, tip, tip - d * hs - perp * hs * 0.5, tip])
         self._add_item(gl.GLLinePlotItem(pos=lines, color=(1, 1, 1, 0.8), width=2.0, antialias=True, mode="lines"))
 
-    def _draw_fill(self, combined, z_min, z_max, z_scale, cz, cmap, thickness):
-        if self._cached_good_faces is None or len(self._cached_good_faces) == 0:
+    def _draw_fill(self, combined, z_scale, thickness):
+        """Draw the whole plate as an axis-aligned 3D cuboid.
+
+        The box spans the XY bounding box of all visible probe points and is
+        `thickness` units tall in original Z units (scaled into transformed
+        space with `z_scale`). The top face sits at the highest probe Z so
+        the probe markers visually rest on (or just above) the slab.
+        """
+        if len(combined) == 0 or thickness <= 0:
             return
-        faces = self._cached_good_faces
-        n = len(combined)
+        x_min = float(combined[:, 0].min())
+        x_max = float(combined[:, 0].max())
+        y_min = float(combined[:, 1].min())
+        y_max = float(combined[:, 1].max())
+        top_z = float(combined[:, 2].max())
+        bot_z = top_z - thickness * z_scale
+        if x_max - x_min < 1e-9 or y_max - y_min < 1e-9:
+            return
 
-        # Top = current surface vertices. Bottom = same XY, Z offset downward.
-        # `combined[:, 2]` is in transformed (z_scale-multiplied) space, so the
-        # offset must be multiplied by z_scale too to stay in original Z units.
-        top = combined
-        bottom = top.copy()
-        bottom[:, 2] -= thickness * z_scale
+        verts = np.array([
+            [x_min, y_min, bot_z],  # 0
+            [x_max, y_min, bot_z],  # 1
+            [x_max, y_max, bot_z],  # 2
+            [x_min, y_max, bot_z],  # 3
+            [x_min, y_min, top_z],  # 4
+            [x_max, y_min, top_z],  # 5
+            [x_max, y_max, top_z],  # 6
+            [x_min, y_max, top_z],  # 7
+        ], dtype=np.float32)
 
-        verts = np.vstack([top, bottom])
+        faces = np.array([
+            # bottom (normal -Z)
+            [0, 2, 1], [0, 3, 2],
+            # top (normal +Z)
+            [4, 5, 6], [4, 6, 7],
+            # -Y side
+            [0, 1, 5], [0, 5, 4],
+            # +X side
+            [1, 2, 6], [1, 6, 5],
+            # +Y side
+            [2, 3, 7], [2, 7, 6],
+            # -X side
+            [3, 0, 4], [3, 4, 7],
+        ], dtype=np.int32)
 
-        top_faces = faces
-        bot_faces = faces[:, ::-1] + n
+        # Slightly different shades per face pair for visible edges.
+        base = np.array([0.55, 0.65, 0.85, 0.9])
+        colors = np.tile(base, (len(faces), 1))
+        # Top a touch brighter, bottom dimmer
+        colors[2:4, :3] *= 1.15
+        colors[0:2, :3] *= 0.5
+        np.clip(colors, 0, 1, out=colors)
 
-        # Boundary edges of the triangulation: each boundary edge occurs in
-        # exactly one face, interior edges occur in two.
-        edges = np.vstack([
-            faces[:, [0, 1]],
-            faces[:, [1, 2]],
-            faces[:, [2, 0]],
-        ])
-        edges_sorted = np.sort(edges, axis=1)
-        _, inv, counts = np.unique(
-            edges_sorted, axis=0, return_inverse=True, return_counts=True
-        )
-        boundary_mask = counts[inv] == 1
-        boundary_edges = edges[boundary_mask]
-
-        a = boundary_edges[:, 0]
-        b = boundary_edges[:, 1]
-        side_tris_1 = np.column_stack([a, b, b + n])
-        side_tris_2 = np.column_stack([a, b + n, a + n])
-        side_faces = np.vstack([side_tris_1, side_tris_2])
-
-        all_faces = np.vstack([top_faces, bot_faces, side_faces])
-
-        # Colours: colormap on top, dimmed copy on bottom, neutral grey on sides
-        z_range = z_max - z_min if z_max - z_min > 1e-9 else 1.0
-        avg_z_top = np.mean(top[top_faces, 2], axis=1)
-        orig_z_top = avg_z_top / max(z_scale, 1e-10) + cz
-        rgba_top = cmap(np.clip((orig_z_top - z_min) / z_range, 0, 1))
-        rgba_top[:, 3] = 0.9
-
-        rgba_bot = rgba_top.copy()
-        rgba_bot[:, :3] *= 0.5
-        rgba_bot[:, 3] = 0.9
-
-        rgba_side = np.tile(
-            np.array([0.6, 0.6, 0.65, 0.9]), (len(side_faces), 1)
-        )
-
-        face_colors = np.vstack([rgba_top, rgba_bot, rgba_side])
-
-        md = gl.MeshData(
-            vertexes=verts, faces=all_faces, faceColors=face_colors
-        )
-        self._add_item(
-            gl.GLMeshItem(
-                meshdata=md, smooth=False, shader="shaded", glOptions="opaque"
-            )
-        )
+        md = gl.MeshData(vertexes=verts, faces=faces, faceColors=colors)
+        self._add_item(gl.GLMeshItem(
+            meshdata=md, smooth=False, shader="shaded", glOptions="opaque",
+            drawEdges=True, edgeColor=(0, 0, 0, 1),
+        ))
