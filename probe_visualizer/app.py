@@ -450,7 +450,7 @@ class MainWindow(QMainWindow):
                 self, "Edit Point locked",
                 "Enter password:", QLineEdit.Password,
             )
-            if ok and pw == "qwerx1231":
+            if ok and pw == "qwerxxd":
                 self._edit_unlocked = True
                 self._last_right_tab = idx
                 return
