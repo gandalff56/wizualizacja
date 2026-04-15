@@ -39,9 +39,6 @@ class MainWindow(QMainWindow):
         self._cnc_timer.setInterval(100)   # 10 Hz poll
         self._cnc_timer.timeout.connect(self._poll_cnc)
 
-        # Error / machine-messages window (created on demand)
-        self._error_window = None
-
         self._setup_menu()
         self._setup_ui_shell()
         self._setup_statusbar()
@@ -88,13 +85,6 @@ class MainWindow(QMainWindow):
         open_btn = QPushButton("Open File")
         open_btn.clicked.connect(self._open_file)
         toolbar.addWidget(open_btn)
-
-        self.err_btn = QPushButton("ERR")
-        self.err_btn.setToolTip(
-            "Open machine messages / alarms window"
-        )
-        self.err_btn.clicked.connect(self._on_err_button)
-        toolbar.addWidget(self.err_btn)
 
         self.cnc_btn = QPushButton("Connect CNC")
         self.cnc_btn.clicked.connect(self._on_cnc_button)
@@ -512,22 +502,6 @@ class MainWindow(QMainWindow):
 
     def _on_view_changed(self, index):
         self.stack.setCurrentIndex(index)
-
-    # === ERR window ===
-
-    def _on_err_button(self):
-        from probe_visualizer.error_window import ErrorWindow
-        if self._error_window is None:
-            self._error_window = ErrorWindow(
-                self, get_client_callback=lambda: self._cnc_client
-            )
-            self._error_window.finished.connect(self._on_err_window_closed)
-        self._error_window.show()
-        self._error_window.raise_()
-        self._error_window.activateWindow()
-
-    def _on_err_window_closed(self, _result=None):
-        self._error_window = None
 
     # === CNC live connection ===
 
