@@ -353,23 +353,67 @@ class FanucFocasClient(CNCClient):
     # -- connection management ------------------------------------------------
 
     def _load_library(self):
+        """Find and load Fwlib32.dll from one of several likely locations.
+
+        Looks in (in order): probe_visualizer/, project root (one up from
+        probe_visualizer/), current working directory, and anything on PATH.
+        On Python 3.8+ each search directory is also added via
+        `os.add_dll_directory` so that any dependent Fanuc DLLs sitting in
+        the same folder (Fwlib0DN.dll, Fwlib00.dll, etc.) can be resolved
+        when Fwlib32.dll pulls them in.
+        """
         here = os.path.dirname(os.path.abspath(__file__))
+        project_root = os.path.dirname(here)
+        cwd = os.getcwd()
+
         if platform.system() == "Windows":
             import ctypes
 
-            candidates = [
-                os.path.join(here, "Fwlib32.dll"),
-                "Fwlib32.dll",  # search PATH
-            ]
+            search_dirs = []
+            for d in (here, project_root, cwd):
+                if d and os.path.isdir(d) and d not in search_dirs:
+                    search_dirs.append(d)
+
+            # Let Windows resolve dependent DLLs from the same folder.
+            added_handles = []
+            if hasattr(os, "add_dll_directory"):
+                for d in search_dirs:
+                    try:
+                        added_handles.append(os.add_dll_directory(d))
+                    except (OSError, FileNotFoundError):
+                        pass
+
+            candidates = []
+            for d in search_dirs:
+                candidates.append(os.path.join(d, "Fwlib32.dll"))
+            candidates.append("Fwlib32.dll")  # fallback: Windows search path
+
             last_err = None
             for cand in candidates:
                 try:
                     return ctypes.windll.LoadLibrary(cand)
                 except OSError as e:
                     last_err = e
+
+            # Clean up the added dll directories on failure.
+            for h in added_handles:
+                try:
+                    h.close()
+                except Exception:
+                    pass
+
             raise RuntimeError(
-                "Fwlib32.dll not found. Copy it next to cnc_client.py or "
-                f"onto PATH. Last loader error: {last_err}"
+                "Fwlib32.dll could not be loaded.\n\n"
+                f"Searched: {', '.join(search_dirs)} + system PATH.\n\n"
+                "Common causes:\n"
+                "  1) Fwlib32.dll is missing (copy it next to main.py or "
+                "into probe_visualizer/).\n"
+                "  2) Bitness mismatch - 32-bit dll with 64-bit Python or "
+                "vice versa.\n"
+                "  3) A dependent DLL is missing. Fwlib32 pulls in other "
+                "Fanuc libraries (e.g. Fwlib0DN.dll, Fwlib00.dll, "
+                "Fwlibe1.dll) that must sit in the same folder.\n\n"
+                f"Loader error: {last_err}"
             )
         # Linux / mac (Fanuc ships libfwlib32.so for some platforms)
         import ctypes
