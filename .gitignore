@@ -3,8 +3,14 @@ __pycache__/
 *.pyc
 build/
 *.spec
-<<<<<<< Updated upstream
-dist/ProbeVisualizer.exe
-=======
 dist/
->>>>>>> Stashed changes
+
+# Fanuc FOCAS library - licensed, must not be redistributed
+*.dll
+probe_visualizer/Fwlib32.dll
+
+# Local editor / OS cruft
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
