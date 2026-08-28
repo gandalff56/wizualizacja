@@ -36,6 +36,13 @@ minDist    = input.int(5, "Min. odległość między pivotami (bary)", minval = 
 maxDist    = input.int(60, "Max. odległość między pivotami (bary)", minval = 2, group = grpPiv)
 minRsiDiff = input.float(1.0, "Min. różnica RSI między pivotami", minval = 0.0, step = 0.5, group = grpPiv, tooltip = "Filtr słabych dywergencji: wymagana minimalna bezwzględna różnica wartości RSI między dwoma pivotami.")
 
+// ── Siła dywergencji ─────────────────────────────────────────────────────────
+grpStr      = "Siła dywergencji"
+minDivStr   = input.float(0.0, "Min. siła dywergencji (0–100)", minval = 0.0, maxval = 100.0, step = 5.0, group = grpStr, tooltip = "Każda dywergencja dostaje ocenę siły 0–100 (50 pkt za rozjazd RSI + 50 pkt za ruch ceny między pivotami). Dywergencje słabsze niż próg są pomijane; 0 = brak filtra.")
+showStrDiv  = input.bool(true, "Pokaż siłę w etykiecie", group = grpStr, tooltip = "Dopisuje ocenę siły (0–100) do tekstu etykiety, np. „Bull 72”.")
+strRsiScale = input.float(20.0, "Skala RSI: ΔRSI = pełne 50 pkt", minval = 1.0, step = 1.0, group = grpStr, tooltip = "Różnica RSI między pivotami, przy której składnik RSI osiąga maksimum (50 pkt).")
+strPrcScale = input.float(5.0, "Skala ceny: Δcena % = pełne 50 pkt", minval = 0.1, step = 0.1, group = grpStr, tooltip = "Procentowa zmiana ceny między pivotami, przy której składnik cenowy osiąga maksimum (50 pkt).")
+
 // ── Dywergencje: przełączniki i style (kolor / styl / grubość) ───────────────
 grpDiv = "Dywergencje — przełączniki i style"
 showRegBull = input.bool(true, "Show Regular Bull", inline = "d1", group = grpDiv, tooltip = "Zwykła bycza: cena niższy dołek (LL), RSI wyższy dołek (HL).")
@@ -112,11 +119,20 @@ f_style(string _s) =>
 f_diffPct(float _a, float _b) =>
     math.abs(_a - _b) / ((_a + _b) / 2.0) * 100.0
 
+// Siła dywergencji 0–100: suma dwóch składników po 50 pkt —
+// rozjazdu RSI (|ΔRSI| / skala RSI) oraz ruchu ceny (|Δcena%| / skala ceny);
+// każdy składnik nasyca się po osiągnięciu swojej skali
+f_divStrength(float _r1, float _r2, float _p1, float _p2) =>
+    float _dRsi = math.abs(_r2 - _r1)
+    float _dPrc = _p1 != 0 ? math.abs(_p2 - _p1) / math.abs(_p1) * 100.0 : 0.0
+    math.min(_dRsi / strRsiScale, 1.0) * 50.0 + math.min(_dPrc / strPrcScale, 1.0) * 50.0
+
 // Rysowanie dywergencji: linia na panelu RSI + (opcjonalnie) linia na wykresie
-// ceny + etykiety przy drugiej nodze formacji
-f_drawDiv(int _x1, float _r1, float _p1, int _x2, float _r2, float _p2, color _col, string _sty, int _wid, string _txt, bool _isBull) =>
+// ceny + etykiety przy drugiej nodze formacji (opcjonalnie z oceną siły 0–100)
+f_drawDiv(int _x1, float _r1, float _p1, int _x2, float _r2, float _p2, color _col, string _sty, int _wid, string _txt, bool _isBull, float _str) =>
     _style = f_style(_sty)
     _lblStyle = _isBull ? label.style_label_up : label.style_label_down
+    string _lblTxt = showStrDiv ? _txt + " " + str.tostring(_str, "#") : _txt
     // linia na panelu RSI (po wartościach RSI)
     line.new(_x1, _r1, _x2, _r2, color = _col, width = _wid, style = _style)
     // linia na wykresie ceny (po low/high) — rysowana w panelu ceny dzięki force_overlay
@@ -124,9 +140,9 @@ f_drawDiv(int _x1, float _r1, float _p1, int _x2, float _r2, float _p2, color _c
         line.new(_x1, _p1, _x2, _p2, color = _col, width = _wid, style = _style, force_overlay = true)
     // etykiety przy drugiej nodze
     if showLabels
-        label.new(_x2, _r2, _txt, style = _lblStyle, color = color.new(_col, 20), textcolor = color.white, size = size.small)
+        label.new(_x2, _r2, _lblTxt, style = _lblStyle, color = color.new(_col, 20), textcolor = color.white, size = size.small)
         if showPriceLines
-            label.new(_x2, _p2, _txt, style = _lblStyle, color = color.new(_col, 20), textcolor = color.white, size = size.small, force_overlay = true)
+            label.new(_x2, _p2, _lblTxt, style = _lblStyle, color = color.new(_col, 20), textcolor = color.white, size = size.small, force_overlay = true)
 
 // ═════════════════════════════════════════════════════════════════════════════
 //  3. DETECTION — WYKRYWANIE FORMACJI
@@ -153,14 +169,15 @@ if rsiPlFound
     float _rsi   = rsiPL              // wartość RSI w dołku
     float _price = low[pivRight]      // cena (low) w barze dołka RSI
     if not na(rsiPlBar)
-        int  _dist = pivBar - rsiPlBar
-        bool _ok   = _dist >= minDist and _dist <= maxDist and math.abs(_rsi - rsiPlVal) >= minRsiDiff
+        int   _dist = pivBar - rsiPlBar
+        float _str  = f_divStrength(rsiPlVal, _rsi, rsiPlPrice, _price)
+        bool  _ok   = _dist >= minDist and _dist <= maxDist and math.abs(_rsi - rsiPlVal) >= minRsiDiff and _str >= minDivStr
         // Regular Bullish: cena niższy dołek (LL), RSI wyższy dołek (HL)
         if _ok and showRegBull and _price < rsiPlPrice and _rsi > rsiPlVal
-            f_drawDiv(rsiPlBar, rsiPlVal, rsiPlPrice, pivBar, _rsi, _price, colRegBull, styRegBull, widRegBull, "Bull", true)
+            f_drawDiv(rsiPlBar, rsiPlVal, rsiPlPrice, pivBar, _rsi, _price, colRegBull, styRegBull, widRegBull, "Bull", true, _str)
         // Hidden Bullish: cena wyższy dołek (HL), RSI niższy dołek (LL)
         if _ok and showHidBull and _price > rsiPlPrice and _rsi < rsiPlVal
-            f_drawDiv(rsiPlBar, rsiPlVal, rsiPlPrice, pivBar, _rsi, _price, colHidBull, styHidBull, widHidBull, "H.Bull", true)
+            f_drawDiv(rsiPlBar, rsiPlVal, rsiPlPrice, pivBar, _rsi, _price, colHidBull, styHidBull, widHidBull, "H.Bull", true, _str)
     // aktualizacja stanu — bieżący pivot staje się „poprzednim” dla następnego
     rsiPlBar   := pivBar
     rsiPlVal   := _rsi
@@ -171,14 +188,15 @@ if rsiPhFound
     float _rsi   = rsiPH              // wartość RSI na szczycie
     float _price = high[pivRight]     // cena (high) w barze szczytu RSI
     if not na(rsiPhBar)
-        int  _dist = pivBar - rsiPhBar
-        bool _ok   = _dist >= minDist and _dist <= maxDist and math.abs(_rsi - rsiPhVal) >= minRsiDiff
+        int   _dist = pivBar - rsiPhBar
+        float _str  = f_divStrength(rsiPhVal, _rsi, rsiPhPrice, _price)
+        bool  _ok   = _dist >= minDist and _dist <= maxDist and math.abs(_rsi - rsiPhVal) >= minRsiDiff and _str >= minDivStr
         // Regular Bearish: cena wyższy szczyt (HH), RSI niższy szczyt (LH)
         if _ok and showRegBear and _price > rsiPhPrice and _rsi < rsiPhVal
-            f_drawDiv(rsiPhBar, rsiPhVal, rsiPhPrice, pivBar, _rsi, _price, colRegBear, styRegBear, widRegBear, "Bear", false)
+            f_drawDiv(rsiPhBar, rsiPhVal, rsiPhPrice, pivBar, _rsi, _price, colRegBear, styRegBear, widRegBear, "Bear", false, _str)
         // Hidden Bearish: cena niższy szczyt (LH), RSI wyższy szczyt (HH)
         if _ok and showHidBear and _price < rsiPhPrice and _rsi > rsiPhVal
-            f_drawDiv(rsiPhBar, rsiPhVal, rsiPhPrice, pivBar, _rsi, _price, colHidBear, styHidBear, widHidBear, "H.Bear", false)
+            f_drawDiv(rsiPhBar, rsiPhVal, rsiPhPrice, pivBar, _rsi, _price, colHidBear, styHidBear, widHidBear, "H.Bear", false, _str)
     rsiPhBar   := pivBar
     rsiPhVal   := _rsi
     rsiPhPrice := _price
@@ -254,6 +272,11 @@ fill(pOB, pOS, color = showFill and showLevels ? colFill : color(na), title = "S
 //    rozciągnięte, „Min. różnica RSI” eliminuje słabe dywergencje, a
 //    „Tolerancja wysokości (%)” decyduje, jak podobne muszą być oba
 //    szczyty/dołki w formacji „2 cyce”.
+// 4a. Siła dywergencji: każda dywergencja dostaje ocenę 0–100 (50 pkt za
+//    wielkość rozjazdu RSI + 50 pkt za wielkość ruchu ceny między pivotami;
+//    skale nasycenia obu składników są konfigurowalne). Suwak „Min. siła
+//    dywergencji” odsiewa sygnały poniżej progu (0 = pokazuj wszystkie),
+//    a ocena może być dopisywana do etykiety, np. „Bull 72”.
 // 5. Każdy typ formacji ma osobny przełącznik, kolor, styl (Solid/Dashed/
 //    Dotted) i grubość linii; linie na wykresie ceny oraz etykiety można
 //    globalnie ukryć w grupie „Wyświetlanie”.
