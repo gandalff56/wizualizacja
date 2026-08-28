@@ -1,0 +1,694 @@
+//@version=6
+// ============================================================================
+//  CipherStyle + Div RSI 6 — połączenie dwóch wskaźników w jeden skrypt
+//
+//  PANEL (dolny):  CipherStyle v3 — WaveTrend (wt1/wt2, żółta fala wt1-wt2),
+//                  Money Flow, kropki na przecięciach, duże kółka kupna/
+//                  sprzedaży, złota kropka oraz dywergencje na WaveTrend.
+//  WYKRES GŁÓWNY:  wszystko z Div RSI 6 v10 — linie dywergencji rysowane po
+//                  CENIE (force_overlay) + etykiety przy świecach: Bull,
+//                  H Bull, Bear, H Bear, S Bull, S Bear, 2cycBull, 2cycBear
+//                  i potencjalne P... Sam wykres RSI nie jest rysowany —
+//                  RSI 6 służy wyłącznie do detekcji.
+//
+//  FILTR DYWERGENCJI HTF (nowość): wskaźnik śledzi OSTATNIĄ dywergencję
+//  RSI 6 (zwykłą lub ukrytą) na dwóch wyższych interwałach (domyślnie 2h
+//  i 4h) — tym samym silnikiem multi-pivot z filtrem linii i filtrem MF,
+//  liczonym w kontekście HTF. O blokadzie decyduje NOWSZA z nich:
+//   • bycza (Bull / H Bull)      → NIE TWORZĄ się Bear, H Bear, S Bear,
+//     2cycBear na RSI (przełącznik),
+//   • niedźwiedzia (Bear/H Bear) → NIE TWORZĄ się Bull, H Bull, S Bull,
+//     2cycBull na RSI (osobny przełącznik — można wyłączyć).
+//  Blokada działa na poziomie DETEKCJI: zablokowany sygnał nie istnieje
+//  (brak linii, etykiety i alertu), więc alerty są zawsze 1:1 z wykresem.
+//  Stan HTF czytany jest wyłącznie z ZAMKNIĘTYCH barów HTF (offset [1]
+//  + lookahead) — filtr nie repaintuje.
+//
+//  Dywergencje WaveTrend w panelu NIE podlegają filtrom MF/HTF (jak w
+//  oryginalnym CipherStyle). To NIE jest kopia Market Cipher — niezależny
+//  wskaźnik w podobnym stylu.
+// ============================================================================
+indicator("CipherStyle + Div RSI 6", shorttitle="Cipher+RSI6", format=format.price, precision=2, max_bars_back=500, max_labels_count=500, max_lines_count=500)
+
+// ------------------------------- Ustawienia --------------------------------
+wtChLen  = input.int(9,  "WT: długość kanału",   minval=1, group="WaveTrend")
+wtAvgLen = input.int(12, "WT: długość średniej", minval=1, group="WaveTrend")
+wtMALen  = input.int(3,  "WT: wygładzenie wt2",  minval=1, group="WaveTrend")
+obLevel  = input.int(53, "Strefa wykupienia",              group="WaveTrend")
+osLevel  = input.int(-53,"Strefa wyprzedania",             group="WaveTrend")
+obLevel2 = input.int(60, "Skrajne wykupienie",             group="WaveTrend")
+osLevel2 = input.int(-60,"Skrajne wyprzedanie",            group="WaveTrend")
+
+rsiLen = input.int(6,  "Długość RSI",  minval=1, group="RSI")
+rsiSrc = input.source(close, "Źródło RSI",       group="RSI")
+
+useMfFilter = input.bool(true, "Filtr Money Flow (Bull gdy MF<0, Bear gdy MF>0)",
+     tooltip="Dotyczy sygnałów RSI: bycze pokazują się tylko, gdy Money Flow jest UJEMNE; niedźwiedzie tylko, gdy MF jest DODATNIE. MF oceniane na świecy potwierdzenia sygnału. Dywergencje WaveTrend w panelu nie podlegają temu filtrowi.", group="Money Flow")
+mfPeriod = input.int(60,    "Money Flow: okres",   minval=1, group="Money Flow")
+mfMult   = input.float(150, "Money Flow: mnożnik", minval=1, group="Money Flow")
+
+lbR        = input.int(2,  "Pivot lookback (prawo)",           minval=1, group="Dywergencje (wspólne)")
+lbL        = input.int(2,  "Pivot lookback (lewo)",            minval=1, group="Dywergencje (wspólne)")
+rangeUpper = input.int(60, "Maks. odległość pivotów (świece)", minval=2, group="Dywergencje (wspólne)")
+rangeLower = input.int(5,  "Min. odległość pivotów (świece)",  minval=1, group="Dywergencje (wspólne)")
+maxPivotsBack = input.int(3, "Ile wcześniejszych pivotów porównywać", minval=1, maxval=10, group="Dywergencje (wspólne)")
+priceMode  = input.string("High/Low (z knotami)", "Porównuj cenę po",
+     options=["High/Low (z knotami)", "Close (same korpusy)"], group="Dywergencje (wspólne)")
+rsiLineMargin = input.float(0.5, "Margines od linii (pkt RSI)", minval=0.0, step=0.5,
+     tooltip="RSI między pivotami musi być o tyle punktów nad linią dywergencji (dołki) lub pod nią (szczyty). 0 = wystarczy, że nie przecina.", group="Dywergencje (wspólne)")
+wtLineMargin  = input.float(2.0, "Margines od linii (pkt WT)", minval=0.0, step=0.5,
+     tooltip="To samo dla dywergencji WaveTrend w panelu.", group="Dywergencje (wspólne)")
+
+showRsiRegBull = input.bool(true, "Zwykłe bycze (Bull)",          group="Sygnały RSI (wykres główny)")
+showRsiHidBull = input.bool(true, "Ukryte bycze (H Bull)",        group="Sygnały RSI (wykres główny)")
+showRsiRegBear = input.bool(true, "Zwykłe niedźwiedzie (Bear)",   group="Sygnały RSI (wykres główny)")
+showRsiHidBear = input.bool(true, "Ukryte niedźwiedzie (H Bear)", group="Sygnały RSI (wykres główny)")
+showRsiLines   = input.bool(true, "Rysuj linie dywergencji na cenie", group="Sygnały RSI (wykres główny)")
+showSuper   = input.bool(true, "Super sygnały (Bull→H Bull / Bear→H Bear)", group="Sygnały RSI (wykres główny)")
+superDist   = input.int(60, "Super: maks. odstęp sygnałów (świece)", minval=1,
+     tooltip="Wyższy dołek ceny z niższym RSI musi pojawić się najpóźniej tyle świec po dołku Bulla, żeby dać Super Bull (analogicznie dla Super Bear).", group="Sygnały RSI (wykres główny)")
+show2cyc    = input.bool(true, "2cycBull / 2cycBear (podwójna dywergencja)", group="Sygnały RSI (wykres główny)")
+cyc2Min     = input.int(2, "2cyc: odstęp większy niż (świece)", minval=0,
+     tooltip="Druga dywergencja musi pojawić się PÓŹNIEJ niż tyle świec po poprzedniej.", group="Sygnały RSI (wykres główny)")
+cyc2Dist    = input.int(6, "2cyc: odstęp mniejszy niż (świece)", minval=2,
+     tooltip="Druga dywergencja w tym samym kierunku musi pojawić się w odstępie MNIEJSZYM niż tyle świec od poprzedniej, żeby dać sygnał 2cyc.", group="Sygnały RSI (wykres główny)")
+showPot     = input.bool(true, "Potencjalne sygnały (P ... — bez potwierdzenia)",
+     tooltip="Pokazuje dywergencję formującą się na bieżącej świecy, zanim pivot potwierdzi się po lbR świecach. UWAGA: te sygnały mogą zniknąć, jeśli dywergencja się nie potwierdzi (repaint).", group="Sygnały RSI (wykres główny)")
+
+showWtRegBull = input.bool(true, "WT: zwykłe bycze (Bull)",          group="Sygnały WT (panel)")
+showWtHidBull = input.bool(true, "WT: ukryte bycze (H Bull)",        group="Sygnały WT (panel)")
+showWtRegBear = input.bool(true, "WT: zwykłe niedźwiedzie (Bear)",   group="Sygnały WT (panel)")
+showWtHidBear = input.bool(true, "WT: ukryte niedźwiedzie (H Bear)", group="Sygnały WT (panel)")
+showWtLines   = input.bool(true, "WT: rysuj linie dywergencji",      group="Sygnały WT (panel)")
+showDots      = input.bool(true, "Kropki na przecięciach wt1/wt2",   group="Sygnały WT (panel)")
+showCircles   = input.bool(true, "Duże kółka kupna/sprzedaży",       group="Sygnały WT (panel)")
+
+// --- Filtr dywergencji HTF (2h / 4h) ---
+useHtfA = input.bool(true, "TF A", inline="ha", group="Filtr dywergencji HTF")
+htfTfA  = input.timeframe("120", "", inline="ha", group="Filtr dywergencji HTF",
+     tooltip="Pierwszy wyższy interwał (domyślnie 2h). Slot działa tylko, gdy jest >= interwałowi wykresu.")
+useHtfB = input.bool(true, "TF B", inline="hb", group="Filtr dywergencji HTF")
+htfTfB  = input.timeframe("240", "", inline="hb", group="Filtr dywergencji HTF",
+     tooltip="Drugi wyższy interwał (domyślnie 4h). Slot działa tylko, gdy jest >= interwałowi wykresu.")
+htfBlockBears = input.bool(true, "Bycza dyw. HTF blokuje: Bear, H Bear, S Bear, 2cycBear",
+     tooltip="Gdy OSTATNIA (nowsza z TF A/B) dywergencja RSI 6 na wyższym interwale jest bycza (Bull lub H Bull), sygnały niedźwiedzie na RSI w ogóle się NIE TWORZĄ (brak linii, etykiet i alertów).", group="Filtr dywergencji HTF")
+htfBlockBulls = input.bool(true, "Niedźwiedzia dyw. HTF blokuje: Bull, H Bull, S Bull, 2cycBull",
+     tooltip="Lustrzany kierunek filtra — wyłącz, jeśli chcesz blokować tylko beary.", group="Filtr dywergencji HTF")
+showHtfInfo = input.bool(true, "Pokaż stan HTF (tabelka w rogu)", group="Filtr dywergencji HTF")
+
+bullColor  = color.new(color.green, 0)
+bearColor  = color.new(color.red, 0)
+hBullColor = color.new(color.teal, 0)
+hBearColor = color.new(color.orange, 0)
+sBullColor = color.new(color.lime, 0)
+sBearColor = color.new(color.fuchsia, 0)
+cBullColor = color.new(#FFD600, 0)
+cBearColor = color.new(#7C4DFF, 0)
+
+// ------------------------------- WaveTrend ---------------------------------
+ap  = hlc3
+esa = ta.ema(ap, wtChLen)
+dd  = ta.ema(math.abs(ap - esa), wtChLen)
+ci  = (ap - esa) / (0.015 * dd)
+wt1 = ta.ema(ci, wtAvgLen)
+wt2 = ta.sma(wt1, wtMALen)
+wtDiff = wt1 - wt2
+
+// ---------------------------------- RSI ------------------------------------
+rsiOsc = ta.rsi(rsiSrc, rsiLen)
+
+// cena używana do porównywania dołków/szczytów: z knotami albo same zamknięcia
+srcLow  = priceMode == "Close (same korpusy)" ? close : low
+srcHigh = priceMode == "Close (same korpusy)" ? close : high
+
+// ------------------------------- Money Flow --------------------------------
+mfRaw = high == low ? 0.0 : (close - open) / (high - low) * mfMult
+mf    = ta.sma(mfRaw, mfPeriod)
+mfTurnsPos = ta.crossover(mf, 0)
+mfTurnsNeg = ta.crossunder(mf, 0)
+bullMfOk = not useMfFilter or mf < 0
+bearMfOk = not useMfFilter or mf > 0
+
+// --------------------- Wspólny filtr nieprzecinania linii -------------------
+// true, gdy prosta między pivotami NIE przecina po drodze wykresu oscylatora:
+// dla dołków oscylator musi być cały czas nad linią (z marginesem), dla
+// szczytów — pod nią. Historia oscylatora podawana jako tablica indeksowana
+// numerem świecy (odczyty osc[x] w warunkowo wołanej funkcji są zawodne)
+_lineClear(array<float> hist, float margin, int fromBar, float fromOsc, int toBar, float toOsc, bool isLow) =>
+    bool ok = true
+    int span = toBar - fromBar
+    if span > 1
+        for b = 1 to span - 1
+            float lineVal = fromOsc + (toOsc - fromOsc) * b / span
+            float oscVal  = array.get(hist, fromBar + b)
+            if isLow ? oscVal < lineVal + margin : oscVal > lineVal - margin
+                ok := false
+                break
+    ok
+
+// historie oscylatorów indeksowane bar_index
+var array<float> rsiHist = array.new_float()
+var array<float> wtHist  = array.new_float()
+array.push(rsiHist, rsiOsc)
+array.push(wtHist, wt2)
+
+// --------------- Filtr dywergencji HTF: detektor w kontekście HTF -----------
+// Samowystarczalna kopia silnika Div RSI 6 (multi-pivot + filtr linii +
+// filtr MF), wykonywana przez request.security w kontekście 2h/4h.
+// Zwraca [kod, czas] OSTATNIEJ dywergencji: 1=Bull, 2=H Bull, -1=Bear,
+// -2=H Bear, 0=jeszcze żadnej; czas = time_close bara HTF potwierdzenia.
+// Wartości zwracane z offsetem [1] → tylko ZAMKNIĘTE bary HTF (bez repaintu).
+f_htfDivState() =>
+    float o = ta.rsi(rsiSrc, rsiLen)
+    var array<float> h = array.new_float()
+    array.push(h, o)
+    float pLo = priceMode == "Close (same korpusy)" ? close : low
+    float pHi = priceMode == "Close (same korpusy)" ? close : high
+    float mfR = high == low ? 0.0 : (close - open) / (high - low) * mfMult
+    float mfH = ta.sma(mfR, mfPeriod)
+    bool bOk = not useMfFilter or mfH < 0
+    bool sOk = not useMfFilter or mfH > 0
+    bool pl = not na(ta.pivotlow(o, lbL, lbR))
+    bool ph = not na(ta.pivothigh(o, lbL, lbR))
+    int  cb = bar_index - lbR
+    var int code = 0
+    var int when = na
+    var array<float> plO = array.new_float()
+    var array<float> plP = array.new_float()
+    var array<int>   plB = array.new_int()
+    var array<float> phO = array.new_float()
+    var array<float> phP = array.new_float()
+    var array<int>   phB = array.new_int()
+    if pl
+        float cO = o[lbR]
+        float cP = pLo[lbR]
+        int n = array.size(plB)
+        if n > 0
+            for i = n - 1 to 0
+                int d = cb - array.get(plB, i)
+                if d > rangeUpper
+                    break
+                if d >= rangeLower
+                    float qO = array.get(plO, i)
+                    float qP = array.get(plP, i)
+                    int   qB = array.get(plB, i)
+                    if bOk and cP < qP and cO > qO and _lineClear(h, rsiLineMargin, qB, qO, cb, cO, true)
+                        code := 1
+                        when := time_close
+                        break
+                    if bOk and cP > qP and cO < qO and _lineClear(h, rsiLineMargin, qB, qO, cb, cO, true)
+                        code := 2
+                        when := time_close
+                        break
+        array.push(plO, cO)
+        array.push(plP, cP)
+        array.push(plB, cb)
+        while array.size(plB) > maxPivotsBack
+            array.shift(plO)
+            array.shift(plP)
+            array.shift(plB)
+    if ph
+        float cO = o[lbR]
+        float cP = pHi[lbR]
+        int n = array.size(phB)
+        if n > 0
+            for i = n - 1 to 0
+                int d = cb - array.get(phB, i)
+                if d > rangeUpper
+                    break
+                if d >= rangeLower
+                    float qO = array.get(phO, i)
+                    float qP = array.get(phP, i)
+                    int   qB = array.get(phB, i)
+                    if sOk and cP > qP and cO < qO and _lineClear(h, rsiLineMargin, qB, qO, cb, cO, false)
+                        code := -1
+                        when := time_close
+                        break
+                    if sOk and cP < qP and cO > qO and _lineClear(h, rsiLineMargin, qB, qO, cb, cO, false)
+                        code := -2
+                        when := time_close
+                        break
+        array.push(phO, cO)
+        array.push(phP, cP)
+        array.push(phB, cb)
+        while array.size(phB) > maxPivotsBack
+            array.shift(phO)
+            array.shift(phP)
+            array.shift(phB)
+    [code[1], when[1]]
+
+// odczyt bez repaintu: [1] wewnątrz funkcji + lookahead_on
+[htfRawA, htfTimeRawA] = request.security(syminfo.tickerid, htfTfA, f_htfDivState(), lookahead = barmerge.lookahead_on)
+[htfRawB, htfTimeRawB] = request.security(syminfo.tickerid, htfTfB, f_htfDivState(), lookahead = barmerge.lookahead_on)
+bool tfAOk = timeframe.in_seconds(htfTfA) >= timeframe.in_seconds(timeframe.period)
+bool tfBOk = timeframe.in_seconds(htfTfB) >= timeframe.in_seconds(timeframe.period)
+int htfCodeA = useHtfA and tfAOk ? nz(htfRawA, 0) : 0
+int htfCodeB = useHtfB and tfBOk ? nz(htfRawB, 0) : 0
+int htfTimeA = useHtfA and tfAOk ? nz(htfTimeRawA, 0) : 0
+int htfTimeB = useHtfB and tfBOk ? nz(htfTimeRawB, 0) : 0
+// o blokadzie decyduje NOWSZA dywergencja z pary TF A/B (remis → TF B)
+bool htfANewer = htfCodeA != 0 and (htfCodeB == 0 or htfTimeA > htfTimeB)
+int  htfLast   = htfANewer ? htfCodeA : htfCodeB
+// bycza dyw. HTF → blokada bearów; niedźwiedzia → blokada bulli
+bool htfBearBlock = htfBlockBears and htfLast > 0
+bool htfBullBlock = htfBlockBulls and htfLast < 0
+// łączna zgoda dla sygnałów RSI (filtr MF + filtr HTF)
+bool bullOk = bullMfOk and not htfBullBlock
+bool bearOk = bearMfOk and not htfBearBlock
+
+// ------------------- Dywergencje WaveTrend (wt2, panel) ---------------------
+plWtFound = not na(ta.pivotlow(wt2, lbL, lbR))
+phWtFound = not na(ta.pivothigh(wt2, lbL, lbR))
+
+var array<float> wtPlOscBuf   = array.new_float()
+var array<float> wtPlPriceBuf = array.new_float()
+var array<int>   wtPlBarBuf   = array.new_int()
+var array<float> wtPhOscBuf   = array.new_float()
+var array<float> wtPhPriceBuf = array.new_float()
+var array<int>   wtPhBarBuf   = array.new_int()
+
+bool wtRegBull    = false
+bool wtHiddenBull = false
+bool wtRegBear    = false
+bool wtHiddenBear = false
+
+if plWtFound
+    float curOsc   = wt2[lbR]
+    float curPrice = srcLow[lbR]
+    int   curBar   = bar_index - lbR
+    int n = array.size(wtPlBarBuf)
+    if n > 0
+        for i = n - 1 to 0
+            int dist = curBar - array.get(wtPlBarBuf, i)
+            if dist > rangeUpper
+                break
+            if dist >= rangeLower
+                float pOsc   = array.get(wtPlOscBuf, i)
+                float pPrice = array.get(wtPlPriceBuf, i)
+                int   pBar   = array.get(wtPlBarBuf, i)
+                if showWtRegBull and not wtRegBull and curPrice < pPrice and curOsc > pOsc and _lineClear(wtHist, wtLineMargin, pBar, pOsc, curBar, curOsc, true)
+                    wtRegBull := true
+                    if showWtLines
+                        line.new(pBar, pOsc, curBar, curOsc, color=bullColor, width=2)
+                if showWtHidBull and not wtHiddenBull and curPrice > pPrice and curOsc < pOsc and _lineClear(wtHist, wtLineMargin, pBar, pOsc, curBar, curOsc, true)
+                    wtHiddenBull := true
+                    if showWtLines
+                        line.new(pBar, pOsc, curBar, curOsc, color=hBullColor, width=2)
+    array.push(wtPlOscBuf, curOsc)
+    array.push(wtPlPriceBuf, curPrice)
+    array.push(wtPlBarBuf, curBar)
+    while array.size(wtPlBarBuf) > maxPivotsBack
+        array.shift(wtPlOscBuf)
+        array.shift(wtPlPriceBuf)
+        array.shift(wtPlBarBuf)
+
+if phWtFound
+    float curOsc   = wt2[lbR]
+    float curPrice = srcHigh[lbR]
+    int   curBar   = bar_index - lbR
+    int n = array.size(wtPhBarBuf)
+    if n > 0
+        for i = n - 1 to 0
+            int dist = curBar - array.get(wtPhBarBuf, i)
+            if dist > rangeUpper
+                break
+            if dist >= rangeLower
+                float pOsc   = array.get(wtPhOscBuf, i)
+                float pPrice = array.get(wtPhPriceBuf, i)
+                int   pBar   = array.get(wtPhBarBuf, i)
+                if showWtRegBear and not wtRegBear and curPrice > pPrice and curOsc < pOsc and _lineClear(wtHist, wtLineMargin, pBar, pOsc, curBar, curOsc, false)
+                    wtRegBear := true
+                    if showWtLines
+                        line.new(pBar, pOsc, curBar, curOsc, color=bearColor, width=2)
+                if showWtHidBear and not wtHiddenBear and curPrice < pPrice and curOsc > pOsc and _lineClear(wtHist, wtLineMargin, pBar, pOsc, curBar, curOsc, false)
+                    wtHiddenBear := true
+                    if showWtLines
+                        line.new(pBar, pOsc, curBar, curOsc, color=hBearColor, width=2)
+    array.push(wtPhOscBuf, curOsc)
+    array.push(wtPhPriceBuf, curPrice)
+    array.push(wtPhBarBuf, curBar)
+    while array.size(wtPhBarBuf) > maxPivotsBack
+        array.shift(wtPhOscBuf)
+        array.shift(wtPhPriceBuf)
+        array.shift(wtPhBarBuf)
+
+// ---------------- Dywergencje RSI 6 (wykres główny, po cenie) ---------------
+plRsiFound = not na(ta.pivotlow(rsiOsc, lbL, lbR))
+phRsiFound = not na(ta.pivothigh(rsiOsc, lbL, lbR))
+
+var array<float> rsiPlOscBuf   = array.new_float()
+var array<float> rsiPlPriceBuf = array.new_float()
+var array<int>   rsiPlBarBuf   = array.new_int()
+var array<float> rsiPhOscBuf   = array.new_float()
+var array<float> rsiPhPriceBuf = array.new_float()
+var array<int>   rsiPhBarBuf   = array.new_int()
+
+bool rsiRegBull    = false
+bool rsiHiddenBull = false
+bool rsiRegBear    = false
+bool rsiHiddenBear = false
+
+// --- dołki: porównanie bieżącego pivota z maks. N wcześniejszymi ---
+if plRsiFound
+    float curOsc   = rsiOsc[lbR]
+    float curPrice = srcLow[lbR]
+    int   curBar   = bar_index - lbR
+    int n = array.size(rsiPlBarBuf)
+    if n > 0
+        for i = n - 1 to 0
+            int dist = curBar - array.get(rsiPlBarBuf, i)
+            if dist > rangeUpper
+                break
+            if dist >= rangeLower
+                float pOsc   = array.get(rsiPlOscBuf, i)
+                float pPrice = array.get(rsiPlPriceBuf, i)
+                int   pBar   = array.get(rsiPlBarBuf, i)
+                // zwykła bycza: cena niższy dołek, RSI wyższy dołek
+                if showRsiRegBull and bullOk and not rsiRegBull and curPrice < pPrice and curOsc > pOsc and _lineClear(rsiHist, rsiLineMargin, pBar, pOsc, curBar, curOsc, true)
+                    rsiRegBull := true
+                    if showRsiLines
+                        line.new(pBar, pPrice, curBar, curPrice, color=bullColor, width=2, force_overlay=true)
+                // ukryta bycza: cena wyższy dołek, RSI niższy dołek
+                if showRsiHidBull and bullOk and not rsiHiddenBull and curPrice > pPrice and curOsc < pOsc and _lineClear(rsiHist, rsiLineMargin, pBar, pOsc, curBar, curOsc, true)
+                    rsiHiddenBull := true
+                    if showRsiLines
+                        line.new(pBar, pPrice, curBar, curPrice, color=hBullColor, width=2, force_overlay=true)
+    array.push(rsiPlOscBuf, curOsc)
+    array.push(rsiPlPriceBuf, curPrice)
+    array.push(rsiPlBarBuf, curBar)
+    while array.size(rsiPlBarBuf) > maxPivotsBack
+        array.shift(rsiPlOscBuf)
+        array.shift(rsiPlPriceBuf)
+        array.shift(rsiPlBarBuf)
+
+// --- szczyty: porównanie bieżącego pivota z maks. N wcześniejszymi ---
+if phRsiFound
+    float curOsc   = rsiOsc[lbR]
+    float curPrice = srcHigh[lbR]
+    int   curBar   = bar_index - lbR
+    int n = array.size(rsiPhBarBuf)
+    if n > 0
+        for i = n - 1 to 0
+            int dist = curBar - array.get(rsiPhBarBuf, i)
+            if dist > rangeUpper
+                break
+            if dist >= rangeLower
+                float pOsc   = array.get(rsiPhOscBuf, i)
+                float pPrice = array.get(rsiPhPriceBuf, i)
+                int   pBar   = array.get(rsiPhBarBuf, i)
+                // zwykła niedźwiedzia: cena wyższy szczyt, RSI niższy szczyt
+                if showRsiRegBear and bearOk and not rsiRegBear and curPrice > pPrice and curOsc < pOsc and _lineClear(rsiHist, rsiLineMargin, pBar, pOsc, curBar, curOsc, false)
+                    rsiRegBear := true
+                    if showRsiLines
+                        line.new(pBar, pPrice, curBar, curPrice, color=bearColor, width=2, force_overlay=true)
+                // ukryta niedźwiedzia: cena niższy szczyt, RSI wyższy szczyt
+                if showRsiHidBear and bearOk and not rsiHiddenBear and curPrice < pPrice and curOsc > pOsc and _lineClear(rsiHist, rsiLineMargin, pBar, pOsc, curBar, curOsc, false)
+                    rsiHiddenBear := true
+                    if showRsiLines
+                        line.new(pBar, pPrice, curBar, curPrice, color=hBearColor, width=2, force_overlay=true)
+    array.push(rsiPhOscBuf, curOsc)
+    array.push(rsiPhPriceBuf, curPrice)
+    array.push(rsiPhBarBuf, curBar)
+    while array.size(rsiPhBarBuf) > maxPivotsBack
+        array.shift(rsiPhOscBuf)
+        array.shift(rsiPhPriceBuf)
+        array.shift(rsiPhBarBuf)
+
+// ------------------------- Super sygnały (sekwencje) ------------------------
+// Super Bull = po Bull kolejny pivot-dołek ma WYŻSZĄ cenę i NIŻSZE RSI.
+// Super Bear = po Bear kolejny pivot-szczyt ma NIŻSZĄ cenę i WYŻSZE RSI.
+var int   pendBullBar   = na
+var float pendBullPrice = na
+var float pendBullOsc   = na
+var int   pendBearBar   = na
+var float pendBearPrice = na
+var float pendBearOsc   = na
+
+bool superBull = false
+bool superBear = false
+int  sigBar    = bar_index - lbR
+
+if showSuper and plRsiFound and not na(pendBullBar) and sigBar > pendBullBar
+    if sigBar - pendBullBar > superDist
+        pendBullBar := na
+    else if bullOk and srcLow[lbR] > pendBullPrice and rsiOsc[lbR] < pendBullOsc and _lineClear(rsiHist, rsiLineMargin, pendBullBar, pendBullOsc, sigBar, rsiOsc[lbR], true)
+        superBull := true
+        if showRsiLines
+            line.new(pendBullBar, pendBullPrice, sigBar, srcLow[lbR], color=sBullColor, width=2, force_overlay=true)
+        pendBullBar := na
+
+if showSuper and phRsiFound and not na(pendBearBar) and sigBar > pendBearBar
+    if sigBar - pendBearBar > superDist
+        pendBearBar := na
+    else if bearOk and srcHigh[lbR] < pendBearPrice and rsiOsc[lbR] > pendBearOsc and _lineClear(rsiHist, rsiLineMargin, pendBearBar, pendBearOsc, sigBar, rsiOsc[lbR], false)
+        superBear := true
+        if showRsiLines
+            line.new(pendBearBar, pendBearPrice, sigBar, srcHigh[lbR], color=sBearColor, width=2, force_overlay=true)
+        pendBearBar := na
+
+if rsiRegBull
+    pendBullBar   := sigBar
+    pendBullPrice := srcLow[lbR]
+    pendBullOsc   := rsiOsc[lbR]
+    pendBearBar   := na
+if rsiRegBear
+    pendBearBar   := sigBar
+    pendBearPrice := srcHigh[lbR]
+    pendBearOsc   := rsiOsc[lbR]
+    pendBullBar   := na
+
+// ---------------------- 2cyc (podwójna dywergencja) -------------------------
+var int lastBullSigBar = na
+var int lastBearSigBar = na
+
+bool anyBullSig = rsiRegBull or rsiHiddenBull or superBull
+bool anyBearSig = rsiRegBear or rsiHiddenBear or superBear
+
+bool cyc2Bull = false
+bool cyc2Bear = false
+
+if anyBullSig
+    if show2cyc and not na(lastBullSigBar) and sigBar - lastBullSigBar > cyc2Min and sigBar - lastBullSigBar < cyc2Dist
+        cyc2Bull := true
+    lastBullSigBar := sigBar
+if anyBearSig
+    if show2cyc and not na(lastBearSigBar) and sigBar - lastBearSigBar > cyc2Min and sigBar - lastBearSigBar < cyc2Dist
+        cyc2Bear := true
+    lastBearSigBar := sigBar
+
+// ------------------- Potencjalne (niepotwierdzone) sygnały ------------------
+bool potBull  = false
+bool potHBull = false
+bool potBear  = false
+bool potHBear = false
+
+if showPot
+    int nL = array.size(rsiPlBarBuf)
+    if nL > 0
+        for i = nL - 1 to 0
+            int dist = bar_index - array.get(rsiPlBarBuf, i)
+            if dist > rangeUpper
+                break
+            if dist >= rangeLower
+                float pOsc   = array.get(rsiPlOscBuf, i)
+                float pPrice = array.get(rsiPlPriceBuf, i)
+                int   pBar   = array.get(rsiPlBarBuf, i)
+                if showRsiRegBull and bullOk and not potBull and srcLow < pPrice and rsiOsc > pOsc and _lineClear(rsiHist, rsiLineMargin, pBar, pOsc, bar_index, rsiOsc, true)
+                    potBull := true
+                if showRsiHidBull and bullOk and not potHBull and srcLow > pPrice and rsiOsc < pOsc and _lineClear(rsiHist, rsiLineMargin, pBar, pOsc, bar_index, rsiOsc, true)
+                    potHBull := true
+    int nH = array.size(rsiPhBarBuf)
+    if nH > 0
+        for i = nH - 1 to 0
+            int dist = bar_index - array.get(rsiPhBarBuf, i)
+            if dist > rangeUpper
+                break
+            if dist >= rangeLower
+                float pOsc   = array.get(rsiPhOscBuf, i)
+                float pPrice = array.get(rsiPhPriceBuf, i)
+                int   pBar   = array.get(rsiPhBarBuf, i)
+                if showRsiRegBear and bearOk and not potBear and srcHigh > pPrice and rsiOsc < pOsc and _lineClear(rsiHist, rsiLineMargin, pBar, pOsc, bar_index, rsiOsc, false)
+                    potBear := true
+                if showRsiHidBear and bearOk and not potHBear and srcHigh < pPrice and rsiOsc > pOsc and _lineClear(rsiHist, rsiLineMargin, pBar, pOsc, bar_index, rsiOsc, false)
+                    potHBear := true
+
+// ---------------------------- Rysowanie panelu ------------------------------
+plot(0, "Zero", color=color.new(color.gray, 60))
+hline(obLevel,  "Wykupienie",         color=color.new(color.gray, 55), linestyle=hline.style_dotted)
+hline(osLevel,  "Wyprzedanie",        color=color.new(color.gray, 55), linestyle=hline.style_dotted)
+hline(obLevel2, "Skrajne wykupienie", color=color.new(color.gray, 75), linestyle=hline.style_dotted)
+hline(osLevel2, "Skrajne wyprzedanie",color=color.new(color.gray, 75), linestyle=hline.style_dotted)
+
+plot(mf, "Money Flow", style=plot.style_area,
+     color=mf >= 0 ? color.new(#26A69A, 60) : color.new(#EF5350, 60))
+
+plot(wt1, "Fala 1 (wt1)", style=plot.style_area, color=color.new(#2962FF, 25))
+plot(wt2, "Fala 2 (wt2)", style=plot.style_area, color=color.new(#00BCD4, 45))
+plot(wtDiff, "wt1-wt2", style=plot.style_area, color=color.new(#FFD600, 55))
+
+// kropki na każdym przecięciu fal
+wtCrossUp   = ta.crossover(wt1, wt2)
+wtCrossDown = ta.crossunder(wt1, wt2)
+plotshape(showDots and wtCrossUp   ? wt2 : na, "Kropka: przecięcie w górę",
+     style=shape.circle, location=location.absolute, color=color.new(color.green, 20), size=size.tiny)
+plotshape(showDots and wtCrossDown ? wt2 : na, "Kropka: przecięcie w dół",
+     style=shape.circle, location=location.absolute, color=color.new(color.red, 20), size=size.tiny)
+
+// duże kółka: przecięcie w strefie skrajnej
+buyCircle  = wtCrossUp   and wt2 <= osLevel
+sellCircle = wtCrossDown and wt2 >= obLevel
+goldBuy    = wtCrossUp   and wt2 <= osLevel2 and mf > 0
+plotshape(showCircles and buyCircle  ? wt2 : na, "Kupno (kółko)",
+     style=shape.circle, location=location.absolute, color=color.new(color.green, 0), size=size.small)
+plotshape(showCircles and sellCircle ? wt2 : na, "Sprzedaż (kółko)",
+     style=shape.circle, location=location.absolute, color=color.new(color.red, 0), size=size.small)
+plotshape(showCircles and goldBuy ? wt2 : na, "Złota kropka (skrajne + MF>0)",
+     style=shape.circle, location=location.absolute, color=color.new(#FFD600, 0), size=size.small)
+
+// etykiety dywergencji WT w panelu
+plotshape(wtRegBull ? wt2[lbR] : na, title="WT: zwykła bycza (Bull)", text="Bull",
+     style=shape.labelup, location=location.absolute, offset=-lbR,
+     color=bullColor, textcolor=color.white)
+plotshape(wtHiddenBull ? wt2[lbR] : na, title="WT: ukryta bycza (H Bull)", text="H Bull",
+     style=shape.labelup, location=location.absolute, offset=-lbR,
+     color=hBullColor, textcolor=color.white)
+plotshape(wtRegBear ? wt2[lbR] : na, title="WT: zwykła niedźwiedzia (Bear)", text="Bear",
+     style=shape.labeldown, location=location.absolute, offset=-lbR,
+     color=bearColor, textcolor=color.white)
+plotshape(wtHiddenBear ? wt2[lbR] : na, title="WT: ukryta niedźwiedzia (H Bear)", text="H Bear",
+     style=shape.labeldown, location=location.absolute, offset=-lbR,
+     color=hBearColor, textcolor=color.white)
+
+// ---------------- Etykiety RSI na WYKRESIE GŁÓWNYM (force_overlay) ----------
+plotshape(rsiRegBull, title="RSI: zwykła bycza (Bull)", text="Bull",
+     style=shape.labelup, location=location.belowbar, offset=-lbR,
+     color=bullColor, textcolor=color.white, force_overlay=true)
+plotshape(rsiHiddenBull, title="RSI: ukryta bycza (H Bull)", text="H Bull",
+     style=shape.labelup, location=location.belowbar, offset=-lbR,
+     color=hBullColor, textcolor=color.white, force_overlay=true)
+plotshape(rsiRegBear, title="RSI: zwykła niedźwiedzia (Bear)", text="Bear",
+     style=shape.labeldown, location=location.abovebar, offset=-lbR,
+     color=bearColor, textcolor=color.white, force_overlay=true)
+plotshape(rsiHiddenBear, title="RSI: ukryta niedźwiedzia (H Bear)", text="H Bear",
+     style=shape.labeldown, location=location.abovebar, offset=-lbR,
+     color=hBearColor, textcolor=color.white, force_overlay=true)
+
+plotshape(superBull, title="Super Bull (Bull→H Bull)", text="S Bull",
+     style=shape.labelup, location=location.belowbar, offset=-lbR,
+     color=sBullColor, textcolor=color.black, force_overlay=true)
+plotshape(superBear, title="Super Bear (Bear→H Bear)", text="S Bear",
+     style=shape.labeldown, location=location.abovebar, offset=-lbR,
+     color=sBearColor, textcolor=color.white, force_overlay=true)
+
+plotshape(cyc2Bull, title="2cycBull (podwójna bycza)", text="2cycBull",
+     style=shape.labelup, location=location.belowbar, offset=-lbR,
+     color=cBullColor, textcolor=color.black, force_overlay=true)
+plotshape(cyc2Bear, title="2cycBear (podwójna niedźwiedzia)", text="2cycBear",
+     style=shape.labeldown, location=location.abovebar, offset=-lbR,
+     color=cBearColor, textcolor=color.white, force_overlay=true)
+
+// potencjalne — wyblakłe etykiety na bieżącej świecy (mogą zniknąć)
+plotshape(potBull, title="P Bull (potencjalna bycza)", text="P Bull",
+     style=shape.labelup, location=location.belowbar,
+     color=color.new(color.green, 55), textcolor=color.new(color.white, 15), force_overlay=true)
+plotshape(potHBull, title="P H Bull (potencjalna ukryta bycza)", text="P H Bull",
+     style=shape.labelup, location=location.belowbar,
+     color=color.new(color.teal, 55), textcolor=color.new(color.white, 15), force_overlay=true)
+plotshape(potBear, title="P Bear (potencjalna niedźwiedzia)", text="P Bear",
+     style=shape.labeldown, location=location.abovebar,
+     color=color.new(color.red, 55), textcolor=color.new(color.white, 15), force_overlay=true)
+plotshape(potHBear, title="P H Bear (potencjalna ukryta niedźwiedzia)", text="P H Bear",
+     style=shape.labeldown, location=location.abovebar,
+     color=color.new(color.orange, 55), textcolor=color.new(color.white, 15), force_overlay=true)
+
+// --------------------- Tabelka stanu filtra HTF -----------------------------
+var table htfBox = na
+if showHtfInfo and barstate.islast
+    if na(htfBox)
+        htfBox := table.new(position.top_right, 1, 2, bgcolor=color.new(#0b1220, 15), frame_width=1, frame_color=color.new(#2a3550, 40))
+    string divTxt = htfLast == 1 ? "Bull" : htfLast == 2 ? "H Bull" : htfLast == -1 ? "Bear" : htfLast == -2 ? "H Bear" : "—"
+    color  divCol = htfLast > 0 ? bullColor : htfLast < 0 ? bearColor : color.new(#9aa4b2, 0)
+    string blkTxt = htfBearBlock ? "Blokada: Bear/2cycBear" : htfBullBlock ? "Blokada: Bull/2cycBull" : "Blokada: brak"
+    table.cell(htfBox, 0, 0, "HTF div (" + htfTfA + "/" + htfTfB + "): " + divTxt, text_color=divCol, text_size=size.small)
+    table.cell(htfBox, 0, 1, blkTxt, text_color=htfBearBlock or htfBullBlock ? color.new(#ffb74d, 0) : color.new(#9aa4b2, 0), text_size=size.tiny)
+
+// -------------------- Wyjścia dla innych skryptów (OUT) ---------------------
+plot(wtRegBull    ? 1 : 0, "OUT WT Bull",         display=display.none)
+plot(wtHiddenBull ? 1 : 0, "OUT WT H Bull",       display=display.none)
+plot(wtRegBear    ? 1 : 0, "OUT WT Bear",         display=display.none)
+plot(wtHiddenBear ? 1 : 0, "OUT WT H Bear",       display=display.none)
+plot(buyCircle    ? 1 : 0, "OUT Kolko kupna",     display=display.none)
+plot(sellCircle   ? 1 : 0, "OUT Kolko sprzedazy", display=display.none)
+plot(goldBuy      ? 1 : 0, "OUT Zlota kropka",    display=display.none)
+plot(wtCrossUp    ? 1 : 0, "OUT WT cross up",     display=display.none)
+plot(wtCrossDown  ? 1 : 0, "OUT WT cross down",   display=display.none)
+plot(mf,  "OUT Money Flow (wartosc)", display=display.none)
+plot(mfTurnsPos ? 1 : 0, "OUT Cipa dodatnia", display=display.none)
+plot(mfTurnsNeg ? 1 : 0, "OUT Cipa ujemna",   display=display.none)
+plot(wt2, "OUT wt2 (wartosc)",        display=display.none)
+plot(rsiRegBull    ? 1 : 0, "OUT RSI Bull",     display=display.none)
+plot(rsiHiddenBull ? 1 : 0, "OUT RSI H Bull",   display=display.none)
+plot(rsiRegBear    ? 1 : 0, "OUT RSI Bear",     display=display.none)
+plot(rsiHiddenBear ? 1 : 0, "OUT RSI H Bear",   display=display.none)
+plot(superBull     ? 1 : 0, "OUT S Bull",       display=display.none)
+plot(superBear     ? 1 : 0, "OUT S Bear",       display=display.none)
+plot(cyc2Bull      ? 1 : 0, "OUT 2cycBull",     display=display.none)
+plot(cyc2Bear      ? 1 : 0, "OUT 2cycBear",     display=display.none)
+
+// -------------------------------- Alerty -----------------------------------
+// CipherStyle (panel)
+alertcondition(mfTurnsPos, title="Cipa dodatnia (Money Flow przechodzi nad 0)",
+     message="CipherStyle: Money Flow przeszedł na DODATNI (zielona fala), {{ticker}} ({{interval}})")
+alertcondition(mfTurnsNeg, title="Cipa ujemna (Money Flow schodzi pod 0)",
+     message="CipherStyle: Money Flow przeszedł na UJEMNY (czerwona fala), {{ticker}} ({{interval}})")
+alertcondition(buyCircle,  title="Kółko kupna (WT cross w strefie wyprzedania)",
+     message="CipherStyle: kółko KUPNA — WT przecięcie w górę w wyprzedaniu, {{ticker}} ({{interval}})")
+alertcondition(sellCircle, title="Kółko sprzedaży (WT cross w strefie wykupienia)",
+     message="CipherStyle: kółko SPRZEDAŻY — WT przecięcie w dół w wykupieniu, {{ticker}} ({{interval}})")
+alertcondition(goldBuy, title="Złota kropka (skrajne wyprzedanie + MF>0)",
+     message="CipherStyle: ZŁOTA kropka kupna, {{ticker}} ({{interval}})")
+alertcondition(wtCrossUp,   title="WT przecięcie w górę",
+     message="CipherStyle: wt1 przecina wt2 w górę, {{ticker}} ({{interval}})")
+alertcondition(wtCrossDown, title="WT przecięcie w dół",
+     message="CipherStyle: wt1 przecina wt2 w dół, {{ticker}} ({{interval}})")
+alertcondition(wtRegBull, title="Zwykła bycza dywergencja WT",
+     message="CipherStyle: zwykła BYCZA dywergencja WaveTrend, {{ticker}} ({{interval}})")
+alertcondition(wtHiddenBull, title="Ukryta bycza dywergencja WT",
+     message="CipherStyle: ukryta BYCZA dywergencja WaveTrend, {{ticker}} ({{interval}})")
+alertcondition(wtRegBear, title="Zwykła niedźwiedzia dywergencja WT",
+     message="CipherStyle: zwykła NIEDŹWIEDZIA dywergencja WaveTrend, {{ticker}} ({{interval}})")
+alertcondition(wtHiddenBear, title="Ukryta niedźwiedzia dywergencja WT",
+     message="CipherStyle: ukryta NIEDŹWIEDZIA dywergencja WaveTrend, {{ticker}} ({{interval}})")
+alertcondition(wtRegBull or wtHiddenBull or wtRegBear or wtHiddenBear, title="Dowolna dywergencja WT",
+     message="CipherStyle: dywergencja WaveTrend, {{ticker}} ({{interval}})")
+// Div RSI 6 (wykres główny) — flagi już po filtrach MF/HTF (alert = wykres)
+alertcondition(rsiRegBull, title="Zwykła bycza dywergencja",
+     message="Zwykła BYCZA dywergencja RSI 6 — {{ticker}} ({{interval}})")
+alertcondition(rsiHiddenBull, title="Ukryta bycza dywergencja",
+     message="Ukryta BYCZA dywergencja RSI 6 — {{ticker}} ({{interval}})")
+alertcondition(rsiRegBear, title="Zwykła niedźwiedzia dywergencja",
+     message="Zwykła NIEDŹWIEDZIA dywergencja RSI 6 — {{ticker}} ({{interval}})")
+alertcondition(rsiHiddenBear, title="Ukryta niedźwiedzia dywergencja",
+     message="Ukryta NIEDŹWIEDZIA dywergencja RSI 6 — {{ticker}} ({{interval}})")
+alertcondition(superBull, title="SUPER BULL (Bull → H Bull)",
+     message="SUPER BULL: zwykła bycza potwierdzona ukrytą byczą — RSI 6, {{ticker}} ({{interval}})")
+alertcondition(superBear, title="SUPER BEAR (Bear → H Bear)",
+     message="SUPER BEAR: zwykła niedźwiedzia potwierdzona ukrytą niedźwiedzią — RSI 6, {{ticker}} ({{interval}})")
+alertcondition(cyc2Bull, title="2cycBull (podwójna bycza dywergencja)",
+     message="2cycBull: druga BYCZA dywergencja w krótkim odstępie — RSI 6, {{ticker}} ({{interval}})")
+alertcondition(cyc2Bear, title="2cycBear (podwójna niedźwiedzia dywergencja)",
+     message="2cycBear: druga NIEDŹWIEDZIA dywergencja w krótkim odstępie — RSI 6, {{ticker}} ({{interval}})")
+alertcondition(rsiRegBull or rsiHiddenBull, title="Dowolna bycza dywergencja",
+     message="Bycza dywergencja RSI 6 (zwykła lub ukryta) — {{ticker}} ({{interval}})")
+alertcondition(rsiRegBear or rsiHiddenBear, title="Dowolna niedźwiedzia dywergencja",
+     message="Niedźwiedzia dywergencja RSI 6 (zwykła lub ukryta) — {{ticker}} ({{interval}})")
+alertcondition(rsiRegBull or rsiHiddenBull or rsiRegBear or rsiHiddenBear, title="Dowolna dywergencja",
+     message="Dywergencja RSI 6 — {{ticker}} ({{interval}})")
+
+// potencjalne — alert tylko w momencie POJAWIENIA się podglądu
+bool potBullAny = potBull or potHBull
+bool potBearAny = potBear or potHBear
+alertcondition(potBullAny and not potBullAny[1], title="POTENCJALNA bycza dywergencja (formuje się)",
+     message="POTENCJALNA bycza dywergencja RSI 6 formuje się (niepotwierdzona) — {{ticker}} ({{interval}})")
+alertcondition(potBearAny and not potBearAny[1], title="POTENCJALNA niedźwiedzia dywergencja (formuje się)",
+     message="POTENCJALNA niedźwiedzia dywergencja RSI 6 formuje się (niepotwierdzona) — {{ticker}} ({{interval}})")
