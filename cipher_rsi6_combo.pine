@@ -92,8 +92,8 @@ htfTfB  = input.timeframe("240", "", inline="hb", group="Filtr dywergencji HTF",
      tooltip="Drugi wyższy interwał (domyślnie 4h). Slot działa tylko, gdy jest >= interwałowi wykresu.")
 htfBlockBears = input.bool(true, "Bycza dyw. HTF blokuje: Bear, H Bear, S Bear, 2cycBear",
      tooltip="Gdy OSTATNIA (nowsza z TF A/B) dywergencja RSI 6 na wyższym interwale jest bycza (Bull lub H Bull), sygnały niedźwiedzie na RSI w ogóle się NIE TWORZĄ (brak linii, etykiet i alertów).", group="Filtr dywergencji HTF")
-htfBlockBulls = input.bool(true, "Niedźwiedzia dyw. HTF blokuje: Bull, H Bull, S Bull, 2cycBull",
-     tooltip="Lustrzany kierunek filtra — wyłącz, jeśli chcesz blokować tylko beary.", group="Filtr dywergencji HTF")
+htfBlockBulls = input.bool(false, "Niedźwiedzia dyw. HTF blokuje: Bull, H Bull, S Bull, 2cycBull",
+     tooltip="Lustrzany kierunek filtra (domyślnie WYŁĄCZONY) — włącz, jeśli niedźwiedzia dywergencja na HTF ma też blokować byki.", group="Filtr dywergencji HTF")
 showHtfInfo = input.bool(true, "Pokaż stan HTF (tabelka w rogu)", group="Filtr dywergencji HTF")
 
 bullColor  = color.new(color.green, 0)
