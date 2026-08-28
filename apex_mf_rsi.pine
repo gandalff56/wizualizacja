@@ -7,7 +7,7 @@
 //     wypełnienie, linia sygnału, histogram momentum, kropki zero-cross
 //     i extreme-reversal, dywergencje MF vs cena, dashboard
 //   • RSI z dywergencjami (regular/hidden, bull/bear) z oceną siły 0–100
-//     oraz formacją „2 cyce” (podwójny szczyt / dołek na cenie)
+//     oraz formacją „2 cyce” — wszystko rysowane NA WYKRESIE GŁÓWNYM (po cenie)
 //
 //  NOWOŚĆ — FILTR KIERUNKU MONEY FLOW (grupa „Filtr Money Flow”):
 //   • „Zgodny z MF”     → formacje bycze (Regular/Hidden Bull, 2 cyce dno)
@@ -16,9 +16,10 @@
 //   • „Przeciwny do MF” → odwrotnie (łapanie odwróceń)
 //   • „Wyłączony”       → bez filtra
 //
-//  SKALA PANELU: −100…100. RSI jest przeskalowane do tej skali
-//  (RSI_disp = 2·RSI − 100, czyli 70→+40, 50→0, 30→−40) — jak w narzędziach
-//  typu Cipher B. Prawdziwa wartość RSI (0–100) jest w dashboardzie.
+//  PODZIAŁ WARSTW: panel = czysty Money Flow (skala −100…100: fala, sygnał,
+//  histogram, kropki, dywergencje MF). Wszystko wykryte przez RSI
+//  (dywergencje z siłą) oraz „2 cyce” rysuje się na wykresie głównym po
+//  cenie (force_overlay). Wartość RSI (0–100) pokazuje dashboard.
 //  Detekcje bez repaintu: pivoty potwierdzone (Pivot Right Bars), sygnały
 //  liczone po zamknięciu bara, brak request.security / lookahead.
 //  To autorski wskaźnik inspirowany estetyką Cipher B — nie oficjalny produkt.
@@ -53,11 +54,9 @@ gFlt         = "Filtr Money Flow"
 mfFilterMode = input.string("Zgodny z MF", "Filtr kierunku dla formacji", options = ["Wyłączony", "Zgodny z MF", "Przeciwny do MF"], group = gFlt, tooltip = "Dotyczy dywergencji RSI (Regular/Hidden Bull i Bear) oraz formacji „2 cyce”.\n• Zgodny z MF: formacje bycze pojawiają się tylko, gdy Money Flow jest byczy (MF > strefa neutralna), a niedźwiedzie tylko przy niedźwiedzim MF.\n• Przeciwny do MF: odwrotnie — bycze przy niedźwiedzim MF (łapanie odwróceń).\n• Wyłączony: brak filtra.\nOcena stanu MF następuje w barze potwierdzenia formacji.")
 
 // ── Grupa: RSI ───────────────────────────────────────────────────────────────
-gRsi        = "RSI"
-rsiLen      = input.int(14, "RSI Length", minval = 2, group = gRsi)
-rsiSrc      = input.source(close, "RSI Source", group = gRsi)
-showRsiLine = input.bool(true, "Pokaż linię RSI na panelu", group = gRsi, tooltip = "RSI rysowane w skali panelu: 2·RSI − 100 (70→+40, 50→0, 30→−40). Prawdziwa wartość RSI jest w dashboardzie.")
-colRsi      = input.color(#7e57c2, "Kolor linii RSI", group = gRsi)
+gRsi   = "RSI"
+rsiLen = input.int(14, "RSI Length", minval = 2, group = gRsi)
+rsiSrc = input.source(close, "RSI Source", group = gRsi, tooltip = "RSI służy wyłącznie do detekcji dywergencji (rysowanych na wykresie głównym) — nie jest wyświetlany w panelu; jego wartość pokazuje dashboard.")
 
 // ── Grupa: Pivoty i filtry (wspólne dla dywergencji i 2 cyce) ────────────────
 gPiv       = "Pivoty i filtry (wspólne)"
@@ -118,18 +117,8 @@ sty2c    = input.string("Dotted", "Styl", options = ["Solid", "Dashed", "Dotted"
 wid2c    = input.int(2, "Grubość", minval = 1, maxval = 5, inline = "c2", group = grp2c)
 
 // ── Grupa: Wyświetlanie ──────────────────────────────────────────────────────
-gVis0          = "Wyświetlanie"
-showPriceLines = input.bool(true, "Pokaż linie dywergencji RSI na wykresie ceny", group = gVis0, tooltip = "Oprócz panelu dywergencje RSI rysowane są też na głównym wykresie (po cenie: low/high).")
-showLabels     = input.bool(true, "Pokaż etykiety", group = gVis0, tooltip = "Etykiety przy drugiej nodze formacji (dywergencje i 2 cyce).")
-
-// ── Grupa: Poziomy RSI ───────────────────────────────────────────────────────
-gLvlR         = "Poziomy RSI"
-showRsiLevels = input.bool(true, "Pokaż poziomy RSI (70 / 50 / 30)", group = gLvlR, tooltip = "Rysowane w skali panelu: 70→+40, 50→0, 30→−40.")
-lvlOB         = input.float(70.0, "Poziom wykupienia", minval = 50.0, maxval = 100.0, group = gLvlR)
-lvlMid        = input.float(50.0, "Poziom środkowy", minval = 0.0, maxval = 100.0, group = gLvlR)
-lvlOS         = input.float(30.0, "Poziom wyprzedania", minval = 0.0, maxval = 50.0, group = gLvlR)
-showRsiFill   = input.bool(false, "Wypełnienie strefy 30–70", group = gLvlR)
-colRsiFill    = input.color(color.new(#7e57c2, 92), "Kolor wypełnienia", group = gLvlR)
+gVis0      = "Wyświetlanie"
+showLabels = input.bool(true, "Pokaż etykiety", group = gVis0, tooltip = "Etykiety przy drugiej nodze formacji (dywergencje RSI i MF oraz 2 cyce).")
 
 // ── Grupa: Visual Money Flow ─────────────────────────────────────────────────
 gVisM       = "Visual Money Flow"
@@ -220,23 +209,13 @@ f_divStrength(float _r1, float _r2, float _p1, float _p2) =>
     float _dPrc = _p1 != 0 ? math.abs(_p2 - _p1) / math.abs(_p1) * 100.0 : 0.0
     math.min(_dRsi / strRsiScale, 1.0) * 50.0 + math.min(_dPrc / strPrcScale, 1.0) * 50.0
 
-// Przeskalowanie RSI (0–100) do skali panelu (−100…100)
-f_rsiY(float _r) =>
-    2.0 * _r - 100.0
-
-// Dywergencja RSI: linia na panelu (w skali panelu) + opcjonalnie na cenie
-// + etykiety przy drugiej nodze (opcjonalnie z oceną siły)
-f_drawDivRsi(int _x1, float _r1, float _p1, int _x2, float _r2, float _p2, color _col, string _sty, int _wid, string _txt, bool _isBull, float _str) =>
-    _style = f_style(_sty)
-    _lblStyle = _isBull ? label.style_label_up : label.style_label_down
+// Dywergencja RSI: rysowana WYŁĄCZNIE na wykresie głównym (force_overlay) —
+// linia po cenie (low/high) + etykieta przy drugiej nodze (z oceną siły)
+f_drawDivRsi(int _x1, float _p1, int _x2, float _p2, color _col, string _sty, int _wid, string _txt, bool _isBull, float _str) =>
     string _lblTxt = showStrDiv ? _txt + " " + str.tostring(_str, "#") : _txt
-    line.new(_x1, f_rsiY(_r1), _x2, f_rsiY(_r2), color = _col, width = _wid, style = _style)
-    if showPriceLines
-        line.new(_x1, _p1, _x2, _p2, color = _col, width = _wid, style = _style, force_overlay = true)
+    line.new(_x1, _p1, _x2, _p2, color = _col, width = _wid, style = f_style(_sty), force_overlay = true)
     if showLabels
-        label.new(_x2, f_rsiY(_r2), _lblTxt, style = _lblStyle, color = color.new(_col, 20), textcolor = color.white, size = size.small)
-        if showPriceLines
-            label.new(_x2, _p2, _lblTxt, style = _lblStyle, color = color.new(_col, 20), textcolor = color.white, size = size.small, force_overlay = true)
+        label.new(_x2, _p2, _lblTxt, style = _isBull ? label.style_label_up : label.style_label_down, color = color.new(_col, 20), textcolor = color.white, size = size.small, force_overlay = true)
 
 // Dywergencja MF: linia + etykieta na panelu (natywna skala fali)
 f_drawDivMf(int _x1, float _y1, int _x2, float _y2, color _c, string _sty, string _txt, bool _isBull) =>
@@ -321,13 +300,13 @@ if not na(rsiPL) and barstate.isconfirmed
         bool  _ok   = _dist >= minDist and _dist <= maxDist and math.abs(_rsi - rsiPlVal) >= minRsiDiff and _str >= minDivStr and allowBull
         // Regular Bullish: cena LL, RSI HL
         if _ok and showRegBull and _price < rsiPlPrice and _rsi > rsiPlVal
-            f_drawDivRsi(rsiPlBar, rsiPlVal, rsiPlPrice, pivBar, _rsi, _price, colRegBull, styRegBull, widRegBull, "Bull", true, _str)
+            f_drawDivRsi(rsiPlBar, rsiPlPrice, pivBar, _price, colRegBull, styRegBull, widRegBull, "Bull", true, _str)
             lastSigTxt := "RSI Regular Bull"
             lastSigBar := bar_index
             evRsiRegBull := true
         // Hidden Bullish: cena HL, RSI LL
         if _ok and showHidBull and _price > rsiPlPrice and _rsi < rsiPlVal
-            f_drawDivRsi(rsiPlBar, rsiPlVal, rsiPlPrice, pivBar, _rsi, _price, colHidBull, styHidBull, widHidBull, "H.Bull", true, _str)
+            f_drawDivRsi(rsiPlBar, rsiPlPrice, pivBar, _price, colHidBull, styHidBull, widHidBull, "H.Bull", true, _str)
             lastSigTxt := "RSI Hidden Bull"
             lastSigBar := bar_index
             evRsiHidBull := true
@@ -345,13 +324,13 @@ if not na(rsiPH) and barstate.isconfirmed
         bool  _ok   = _dist >= minDist and _dist <= maxDist and math.abs(_rsi - rsiPhVal) >= minRsiDiff and _str >= minDivStr and allowBear
         // Regular Bearish: cena HH, RSI LH
         if _ok and showRegBear and _price > rsiPhPrice and _rsi < rsiPhVal
-            f_drawDivRsi(rsiPhBar, rsiPhVal, rsiPhPrice, pivBar, _rsi, _price, colRegBear, styRegBear, widRegBear, "Bear", false, _str)
+            f_drawDivRsi(rsiPhBar, rsiPhPrice, pivBar, _price, colRegBear, styRegBear, widRegBear, "Bear", false, _str)
             lastSigTxt := "RSI Regular Bear"
             lastSigBar := bar_index
             evRsiRegBear := true
         // Hidden Bearish: cena LH, RSI HH
         if _ok and showHidBear and _price < rsiPhPrice and _rsi > rsiPhVal
-            f_drawDivRsi(rsiPhBar, rsiPhVal, rsiPhPrice, pivBar, _rsi, _price, colHidBear, styHidBear, widHidBear, "H.Bear", false, _str)
+            f_drawDivRsi(rsiPhBar, rsiPhPrice, pivBar, _price, colHidBear, styHidBear, widHidBear, "H.Bear", false, _str)
             lastSigTxt := "RSI Hidden Bear"
             lastSigBar := bar_index
             evRsiHidBear := true
@@ -452,14 +431,7 @@ plot(-extSoft, "MF −miękki", color = colLvlSoft, style = plot.style_circles, 
 plot(extHard, "MF +twardy", color = colLvlHard, style = plot.style_circles, linewidth = 1, display = display.pane, editable = false)
 plot(-extHard, "MF −twardy", color = colLvlHard, style = plot.style_circles, linewidth = 1, display = display.pane, editable = false)
 
-// Poziomy RSI w skali panelu (70→+40, 50→0, 30→−40) + opcjonalne wypełnienie
-color colLvlRsi = color.new(colRsi, 60)
-pObT = plot(showRsiLevels ? f_rsiY(lvlOB) : na, "RSI 70", color = colLvlRsi, style = plot.style_circles, linewidth = 1, display = display.pane, editable = false)
-plot(showRsiLevels ? f_rsiY(lvlMid) : na, "RSI 50", color = color.new(colRsi, 80), style = plot.style_circles, linewidth = 1, display = display.pane, editable = false)
-pOsT = plot(showRsiLevels ? f_rsiY(lvlOS) : na, "RSI 30", color = colLvlRsi, style = plot.style_circles, linewidth = 1, display = display.pane, editable = false)
-fill(pObT, pOsT, color = showRsiFill and showRsiLevels ? colRsiFill : color(na), title = "Strefa RSI 30–70")
-
-// Wyraźna linia zero (wspólna: MF 0 ↔ RSI 50)
+// Wyraźna linia zero
 plot(0, "Zero", color = colZero, linewidth = 2, display = display.pane, editable = false)
 
 // Histogram momentum MF: jasny gdy siła narasta, ciemny gdy słabnie
@@ -480,9 +452,6 @@ color waveCol = mf >= 0 ? colBull : colBear
 plot(glowOn ? mf : na, "MF Glow", color = color.new(waveCol, 80), linewidth = 8, display = display.pane, editable = false)
 plot(mf, "Money Flow", color = waveCol, linewidth = 3)
 plot(sig, "Signal MF", color = colSignal, linewidth = 1)
-
-// RSI przeskalowane do panelu (prawdziwa wartość w dashboardzie)
-plot(showRsiLine ? f_rsiY(rsiVal) : na, "RSI (przeskalowane)", color = colRsi, linewidth = 2)
 
 // Kropki sygnałowe MF
 plot(dotUp ? mf : na, "Kropka: cross w górę", style = plot.style_circles, linewidth = 4, color = colBull, display = display.pane)
@@ -560,9 +529,10 @@ alertcondition(dotExtS,      "Kropka: Extreme Sell",    "Apex MF+RSI: Extreme Se
 // ═════════════════════════════════════════════════════════════════════════════
 //  JAK UŻYWAĆ
 // ═════════════════════════════════════════════════════════════════════════════
-// 1. Wklej kod do Pine Editor i kliknij „Add to chart”. Wszystko rysuje się
-//    w jednym panelu (skala −100…100); linie dywergencji RSI i formacja
-//    „2 cyce” dodatkowo na wykresie ceny (force_overlay).
+// 1. Wklej kod do Pine Editor i kliknij „Add to chart”. Panel pokazuje
+//    WYŁĄCZNIE Money Flow (fala, sygnał, histogram, kropki, dywergencje MF),
+//    a wszystko wykryte przez RSI (dywergencje z oceną siły) oraz formacja
+//    „2 cyce” rysuje się na wykresie głównym po cenie (force_overlay).
 // 2. Filtr Money Flow (grupa „Filtr Money Flow”):
 //    • „Zgodny z MF” (domyślnie) — Bull / H.Bull / 2 cyce (dno) tylko przy
 //      byczym MF; Bear / H.Bear / 2 cyce (szczyt) tylko przy niedźwiedzim MF.
@@ -570,9 +540,8 @@ alertcondition(dotExtS,      "Kropka: Extreme Sell",    "Apex MF+RSI: Extreme Se
 //    • „Wyłączony” — formacje bez filtra.
 //    Stan MF wyznacza „Strefa neutralna (±)” — w pasie neutralnym filtrowane
 //    formacje nie są rysowane (poza trybem „Wyłączony”).
-// 3. RSI jest przeskalowane do skali panelu: 70→+40, 50→0, 30→−40 (przy
-//    domyślnych ustawieniach poziom RSI 70 pokrywa się z ekstremum MF +40).
-//    Prawdziwą wartość RSI (0–100) pokazuje dashboard.
+// 3. RSI nie jest rysowane w panelu — służy wyłącznie do detekcji
+//    dywergencji; jego bieżącą wartość (0–100) pokazuje dashboard.
 // 4. Sygnały powstają po potwierdzeniu pivota („Pivot Right Bars” barów po
 //    ekstremum) i po zamknięciu bara — wskaźnik nie repaintuje, ale sygnał
 //    jest z natury opóźniony.
