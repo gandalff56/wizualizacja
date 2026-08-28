@@ -290,10 +290,12 @@ if plWtFound
                     wtRegBull := true
                     if showWtLines
                         line.new(pBar, pOsc, curBar, curOsc, color=bullColor, width=2)
+                    label.new(curBar, curOsc, "Bull", style=label.style_label_up, color=bullColor, textcolor=color.white, size=size.small)
                 if showWtHidBull and not wtHiddenBull and curPrice > pPrice and curOsc < pOsc and _lineClear(wtHist, wtLineMargin, pBar, pOsc, curBar, curOsc, true)
                     wtHiddenBull := true
                     if showWtLines
                         line.new(pBar, pOsc, curBar, curOsc, color=hBullColor, width=2)
+                    label.new(curBar, curOsc, "H Bull", style=label.style_label_up, color=hBullColor, textcolor=color.white, size=size.small)
     array.push(wtPlOscBuf, curOsc)
     array.push(wtPlPriceBuf, curPrice)
     array.push(wtPlBarBuf, curBar)
@@ -320,10 +322,12 @@ if phWtFound
                     wtRegBear := true
                     if showWtLines
                         line.new(pBar, pOsc, curBar, curOsc, color=bearColor, width=2)
+                    label.new(curBar, curOsc, "Bear", style=label.style_label_down, color=bearColor, textcolor=color.white, size=size.small)
                 if showWtHidBear and not wtHiddenBear and curPrice < pPrice and curOsc > pOsc and _lineClear(wtHist, wtLineMargin, pBar, pOsc, curBar, curOsc, false)
                     wtHiddenBear := true
                     if showWtLines
                         line.new(pBar, pOsc, curBar, curOsc, color=hBearColor, width=2)
+                    label.new(curBar, curOsc, "H Bear", style=label.style_label_down, color=hBearColor, textcolor=color.white, size=size.small)
     array.push(wtPhOscBuf, curOsc)
     array.push(wtPhPriceBuf, curPrice)
     array.push(wtPhBarBuf, curBar)
@@ -368,11 +372,13 @@ if plRsiFound
                     rsiRegBull := true
                     if showRsiLines
                         line.new(pBar, pPrice, curBar, curPrice, color=bullColor, width=2, force_overlay=true)
+                    label.new(curBar, curPrice, "Bull", style=label.style_label_up, color=bullColor, textcolor=color.white, size=size.small, force_overlay=true)
                 // ukryta bycza: cena wyższy dołek, RSI niższy dołek
                 if showRsiHidBull and bullOk and not rsiHiddenBull and curPrice > pPrice and curOsc < pOsc and _lineClear(rsiHist, rsiLineMargin, pBar, pOsc, curBar, curOsc, true)
                     rsiHiddenBull := true
                     if showRsiLines
                         line.new(pBar, pPrice, curBar, curPrice, color=hBullColor, width=2, force_overlay=true)
+                    label.new(curBar, curPrice, "H Bull", style=label.style_label_up, color=hBullColor, textcolor=color.white, size=size.small, force_overlay=true)
     array.push(rsiPlOscBuf, curOsc)
     array.push(rsiPlPriceBuf, curPrice)
     array.push(rsiPlBarBuf, curBar)
@@ -401,11 +407,13 @@ if phRsiFound
                     rsiRegBear := true
                     if showRsiLines
                         line.new(pBar, pPrice, curBar, curPrice, color=bearColor, width=2, force_overlay=true)
+                    label.new(curBar, curPrice, "Bear", style=label.style_label_down, color=bearColor, textcolor=color.white, size=size.small, force_overlay=true)
                 // ukryta niedźwiedzia: cena niższy szczyt, RSI wyższy szczyt
                 if showRsiHidBear and bearOk and not rsiHiddenBear and curPrice < pPrice and curOsc > pOsc and _lineClear(rsiHist, rsiLineMargin, pBar, pOsc, curBar, curOsc, false)
                     rsiHiddenBear := true
                     if showRsiLines
                         line.new(pBar, pPrice, curBar, curPrice, color=hBearColor, width=2, force_overlay=true)
+                    label.new(curBar, curPrice, "H Bear", style=label.style_label_down, color=hBearColor, textcolor=color.white, size=size.small, force_overlay=true)
     array.push(rsiPhOscBuf, curOsc)
     array.push(rsiPhPriceBuf, curPrice)
     array.push(rsiPhBarBuf, curBar)
@@ -435,6 +443,7 @@ if showSuper and plRsiFound and not na(pendBullBar) and sigBar > pendBullBar
         superBull := true
         if showRsiLines
             line.new(pendBullBar, pendBullPrice, sigBar, srcLow[lbR], color=sBullColor, width=2, force_overlay=true)
+        label.new(sigBar, srcLow[lbR], "S Bull", style=label.style_label_up, color=sBullColor, textcolor=color.black, size=size.small, force_overlay=true)
         pendBullBar := na
 
 if showSuper and phRsiFound and not na(pendBearBar) and sigBar > pendBearBar
@@ -444,6 +453,7 @@ if showSuper and phRsiFound and not na(pendBearBar) and sigBar > pendBearBar
         superBear := true
         if showRsiLines
             line.new(pendBearBar, pendBearPrice, sigBar, srcHigh[lbR], color=sBearColor, width=2, force_overlay=true)
+        label.new(sigBar, srcHigh[lbR], "S Bear", style=label.style_label_down, color=sBearColor, textcolor=color.white, size=size.small, force_overlay=true)
         pendBearBar := na
 
 if rsiRegBull
@@ -470,10 +480,12 @@ bool cyc2Bear = false
 if anyBullSig
     if show2cyc and not na(lastBullSigBar) and sigBar - lastBullSigBar > cyc2Min and sigBar - lastBullSigBar < cyc2Dist
         cyc2Bull := true
+        label.new(sigBar, srcLow[lbR], "2cycBull", style=label.style_label_up, color=cBullColor, textcolor=color.black, size=size.small, force_overlay=true)
     lastBullSigBar := sigBar
 if anyBearSig
     if show2cyc and not na(lastBearSigBar) and sigBar - lastBearSigBar > cyc2Min and sigBar - lastBearSigBar < cyc2Dist
         cyc2Bear := true
+        label.new(sigBar, srcHigh[lbR], "2cycBear", style=label.style_label_down, color=cBearColor, textcolor=color.white, size=size.small, force_overlay=true)
     lastBearSigBar := sigBar
 
 // ------------------- Potencjalne (niepotwierdzone) sygnały ------------------
@@ -545,47 +557,9 @@ plotshape(showCircles and sellCircle ? wt2 : na, "Sprzedaż (kółko)",
 plotshape(showCircles and goldBuy ? wt2 : na, "Złota kropka (skrajne + MF>0)",
      style=shape.circle, location=location.absolute, color=color.new(#FFD600, 0), size=size.small)
 
-// etykiety dywergencji WT w panelu
-plotshape(wtRegBull ? wt2[lbR] : na, title="WT: zwykła bycza (Bull)", text="Bull",
-     style=shape.labelup, location=location.absolute, offset=-lbR,
-     color=bullColor, textcolor=color.white)
-plotshape(wtHiddenBull ? wt2[lbR] : na, title="WT: ukryta bycza (H Bull)", text="H Bull",
-     style=shape.labelup, location=location.absolute, offset=-lbR,
-     color=hBullColor, textcolor=color.white)
-plotshape(wtRegBear ? wt2[lbR] : na, title="WT: zwykła niedźwiedzia (Bear)", text="Bear",
-     style=shape.labeldown, location=location.absolute, offset=-lbR,
-     color=bearColor, textcolor=color.white)
-plotshape(wtHiddenBear ? wt2[lbR] : na, title="WT: ukryta niedźwiedzia (H Bear)", text="H Bear",
-     style=shape.labeldown, location=location.absolute, offset=-lbR,
-     color=hBearColor, textcolor=color.white)
-
-// ---------------- Etykiety RSI na WYKRESIE GŁÓWNYM (force_overlay) ----------
-plotshape(rsiRegBull, title="RSI: zwykła bycza (Bull)", text="Bull",
-     style=shape.labelup, location=location.belowbar, offset=-lbR,
-     color=bullColor, textcolor=color.white, force_overlay=true)
-plotshape(rsiHiddenBull, title="RSI: ukryta bycza (H Bull)", text="H Bull",
-     style=shape.labelup, location=location.belowbar, offset=-lbR,
-     color=hBullColor, textcolor=color.white, force_overlay=true)
-plotshape(rsiRegBear, title="RSI: zwykła niedźwiedzia (Bear)", text="Bear",
-     style=shape.labeldown, location=location.abovebar, offset=-lbR,
-     color=bearColor, textcolor=color.white, force_overlay=true)
-plotshape(rsiHiddenBear, title="RSI: ukryta niedźwiedzia (H Bear)", text="H Bear",
-     style=shape.labeldown, location=location.abovebar, offset=-lbR,
-     color=hBearColor, textcolor=color.white, force_overlay=true)
-
-plotshape(superBull, title="Super Bull (Bull→H Bull)", text="S Bull",
-     style=shape.labelup, location=location.belowbar, offset=-lbR,
-     color=sBullColor, textcolor=color.black, force_overlay=true)
-plotshape(superBear, title="Super Bear (Bear→H Bear)", text="S Bear",
-     style=shape.labeldown, location=location.abovebar, offset=-lbR,
-     color=sBearColor, textcolor=color.white, force_overlay=true)
-
-plotshape(cyc2Bull, title="2cycBull (podwójna bycza)", text="2cycBull",
-     style=shape.labelup, location=location.belowbar, offset=-lbR,
-     color=cBullColor, textcolor=color.black, force_overlay=true)
-plotshape(cyc2Bear, title="2cycBear (podwójna niedźwiedzia)", text="2cycBear",
-     style=shape.labeldown, location=location.abovebar, offset=-lbR,
-     color=cBearColor, textcolor=color.white, force_overlay=true)
+// Etykiety potwierdzonych sygnałów (WT w panelu, RSI/S/2cyc na wykresie
+// głównym) rysowane są przez label.new w miejscu detekcji — label.new nie
+// liczy się do limitu 64 plotów (plotshape liczy się podwójnie).
 
 // potencjalne — wyblakłe etykiety na bieżącej świecy (mogą zniknąć)
 plotshape(potBull, title="P Bull (potencjalna bycza)", text="P Bull",
