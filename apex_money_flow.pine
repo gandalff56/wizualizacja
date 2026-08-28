@@ -1,0 +1,297 @@
+//@version=6
+// ═════════════════════════════════════════════════════════════════════════════
+//  APEX MONEY FLOW  (Pine Script v6)
+//  ───────────────────────────────────────────────────────────────────────────
+//  Autorski oscylator Money Flow inspirowany ESTETYKĄ narzędzi typu Cipher B.
+//  To NIE jest oficjalny produkt „Market Cipher” — cała logika jest własna:
+//  znormalizowany przepływ wolumenu (rodzina Chaikin: mnożnik pozycji ceny
+//  w barze × wolumen), sprowadzony do zakresu ~ −100…100 i wygładzony do
+//  grubej, płynnej fali. Powyżej 0 = presja kupna, poniżej 0 = presja
+//  sprzedaży; im dalej od zera, tym silniejszy przepływ.
+//  Kropki sygnałowe liczone PO ZAMKNIĘCIU bara, dywergencje na POTWIERDZONYCH
+//  pivotach — bez repaintu. Na symbolach bez wolumenu działa fallback
+//  (flow czysto cenowy) z informacją w dashboardzie.
+// ═════════════════════════════════════════════════════════════════════════════
+//  max_bars_back ustawione świadomie: pivoty (left+right) + max dystans
+//  dywergencji + zapas — 500 barów wystarcza z dużym marginesem.
+indicator("Apex Money Flow", shorttitle = "Apex MF", overlay = false, precision = 2, max_bars_back = 500, max_lines_count = 500, max_labels_count = 500)
+
+// ═════════════════════════════════════════════════════════════════════════════
+//  1. INPUTS — USTAWIENIA
+// ═════════════════════════════════════════════════════════════════════════════
+
+// ── Grupa: Money Flow ────────────────────────────────────────────────────────
+gMF       = "Money Flow"
+srcIn     = input.source(hlc3, "Source", group = gMF, tooltip = "Cena użyta w mnożniku przepływu (hlc3 / ohlc4 / close).")
+mfLen     = input.int(14, "MF Length", minval = 2, group = gMF, tooltip = "Okres normalizacji przepływu wolumenu.")
+smoothLen = input.int(4, "Smooth Length", minval = 1, group = gMF, tooltip = "Dodatkowe wygładzenie — im więcej, tym grubsza i płynniejsza fala.")
+sigLen    = input.int(7, "Signal Length", minval = 1, group = gMF, tooltip = "Okres szybszej linii sygnału liczonej po fali MF.")
+maTypeIn  = input.string("EMA", "Metoda wygładzenia", options = ["EMA", "SMA", "RMA", "HMA"], group = gMF)
+
+// ── Grupa: Sygnały ───────────────────────────────────────────────────────────
+gSig         = "Sygnały"
+showZeroDots = input.bool(true, "Show zero-cross dots", group = gSig, tooltip = "Kropka, gdy fala MF przecina 0, a histogram potwierdza kierunek.")
+showExtDots  = input.bool(true, "Show extreme reversal dots", group = gSig, tooltip = "Kropka złota/cyjanowa: fala w strefie ekstremum + odwrócenie histogramu (przecięcie 0 przez histogram).")
+minStr       = input.float(1.0, "Minimalna siła do kropki (|histogram|)", minval = 0.0, step = 0.25, group = gSig, tooltip = "Filtr słabych sygnałów: wymagana wartość bezwzględna histogramu przy przecięciu zera.")
+coolBars     = input.int(5, "Cooldown między kropkami (bary)", minval = 0, group = gSig)
+neutralZone  = input.float(5.0, "Strefa neutralna (±)", minval = 0.0, group = gSig, tooltip = "W tym pasie wokół zera dashboard pokazuje stan NEUTRAL.")
+extSoft      = input.float(40.0, "Ekstremum miękkie (±)", minval = 1.0, group = gSig, tooltip = "Strefa overbought/oversold flow — próg dla kropek ekstremalnych.")
+extHard      = input.float(60.0, "Ekstremum twarde (±)", minval = 1.0, group = gSig)
+
+// ── Grupa: Dywergencje ───────────────────────────────────────────────────────
+gDiv        = "Dywergencje"
+pivL        = input.int(5, "Pivot left", minval = 1, group = gDiv)
+pivR        = input.int(5, "Pivot right", minval = 1, group = gDiv, tooltip = "Pivot (i dywergencja) potwierdza się dopiero po tylu barach — ochrona przed repaintem.")
+minDistD    = input.int(5, "Min. dystans między pivotami (bary)", minval = 1, group = gDiv)
+maxDistD    = input.int(60, "Max. dystans między pivotami (bary)", minval = 2, group = gDiv)
+showRegBull = input.bool(true, "Regular Bull", inline = "dv1", group = gDiv)
+showHidBull = input.bool(true, "Hidden Bull", inline = "dv1", group = gDiv)
+showRegBear = input.bool(true, "Regular Bear", inline = "dv2", group = gDiv)
+showHidBear = input.bool(true, "Hidden Bear", inline = "dv2", group = gDiv)
+colDivBull  = input.color(#ffeb3b, "Kolor bull", inline = "dv3", group = gDiv)
+colDivBear  = input.color(#e040fb, "Kolor bear", inline = "dv3", group = gDiv)
+styDivReg   = input.string("Solid", "Styl regular", options = ["Solid", "Dashed", "Dotted"], inline = "dv4", group = gDiv)
+styDivHid   = input.string("Dashed", "Styl hidden", options = ["Solid", "Dashed", "Dotted"], inline = "dv4", group = gDiv)
+divWid      = input.int(1, "Grubość linii dywergencji", minval = 1, maxval = 4, group = gDiv)
+
+// ── Grupa: Visual ────────────────────────────────────────────────────────────
+gVis        = "Visual"
+colBull     = input.color(#00e676, "Bull (fala / ekstremum fill)", group = gVis)
+colBullDeep = input.color(#00796b, "Bull przy zerze (teal)", group = gVis)
+colBear     = input.color(#ff5252, "Bear (fala / ekstremum fill)", group = gVis)
+colBearDeep = input.color(#6d1b1b, "Bear przy zerze (maroon)", group = gVis)
+colSignal   = input.color(#e8eaf0, "Linia sygnału", group = gVis)
+colHistUp   = input.color(#3b82f6, "Histogram dodatni", inline = "vh", group = gVis)
+colHistDn   = input.color(#f97316, "Histogram ujemny", inline = "vh", group = gVis)
+colGold     = input.color(#ffd700, "Kropka Extreme Buy", inline = "vd", group = gVis)
+colCyan     = input.color(#00e5ff, "Kropka Extreme Sell", inline = "vd", group = gVis)
+colZero     = input.color(#78828e, "Linia zero", group = gVis)
+fillTransp  = input.int(55, "Transparency fill (0–95)", minval = 0, maxval = 95, group = gVis)
+glowOn      = input.bool(true, "Glow pod falą", group = gVis)
+showDash    = input.bool(true, "Show dashboard", group = gVis)
+dashPos     = input.string("Góra-prawo", "Pozycja dashboardu", options = ["Góra-prawo", "Góra-lewo", "Dół-prawo", "Dół-lewo"], group = gVis)
+showHist    = input.bool(true, "Show histogram", group = gVis)
+showLevels  = input.bool(true, "Show levels (ekstrema)", group = gVis)
+darkBg      = input.bool(true, "Ciemne tło panelu", group = gVis)
+
+// ═════════════════════════════════════════════════════════════════════════════
+//  2. CALC — OBLICZENIA MONEY FLOW
+// ═════════════════════════════════════════════════════════════════════════════
+
+// Uniwersalna średnia — metoda wybierana w ustawieniach (parametry simple,
+// więc gałąź jest stała w czasie i wywołania ta.* są spójne bar po barze)
+f_ma(float _src, simple int _len, simple string _type) =>
+    switch _type
+        "EMA" => ta.ema(_src, _len)
+        "SMA" => ta.sma(_src, _len)
+        "RMA" => ta.rma(_src, _len)
+        => ta.hma(_src, _len)
+
+// Fallback wolumenu: symbol bez danych wolumenu → stała 1.0 (flow czysto
+// cenowy); informacja o fallbacku trafia do dashboardu
+bool  hasVol = not na(volume)
+float vol    = hasVol ? volume : 1.0
+
+// Mnożnik przepływu (rodzina Chaikin): pozycja źródła wewnątrz bara, −1…+1.
+// Dla src = close to klasyczny money multiplier ((c−l)−(h−c))/(h−l)
+float hlRange = high - low
+float mult    = hlRange > 0 ? (2.0 * srcIn - high - low) / hlRange : 0.0
+
+// Surowy przepływ ze znakiem: mnożnik × wolumen
+float rawFlow = mult * vol
+
+// Normalizacja do ~ −100…100: średni przepływ / średni |przepływ|.
+// Dzięki temu fala oscyluje wokół 0 i reaguje na wolumen, nie tylko na cenę
+float flowMa    = f_ma(rawFlow, mfLen, maTypeIn)
+float flowAbsMa = f_ma(math.abs(rawFlow), mfLen, maTypeIn)
+float mfCoreRaw = flowAbsMa > 0 ? 100.0 * flowMa / flowAbsMa : 0.0
+float mfCore    = math.max(-100.0, math.min(100.0, mfCoreRaw))   // klamra na wypadek przestrzału HMA
+
+// Główna fala (gruba, płynna), szybsza linia sygnału i histogram momentum
+float mf   = f_ma(mfCore, smoothLen, maTypeIn)
+float sig  = f_ma(mf, sigLen, maTypeIn)
+float hist = mf - sig
+
+// ═════════════════════════════════════════════════════════════════════════════
+//  3. SIGNALS — KROPKI (liczone po zamknięciu bara, bez repaintu)
+// ═════════════════════════════════════════════════════════════════════════════
+
+// Stan: ostatnia kropka (cooldown) i ostatni sygnał (dashboard)
+var int    lastDotBar = na
+var int    lastSigBar = na
+var string lastSigTxt = "—"
+
+bool coolOk   = na(lastDotBar) or bar_index - lastDotBar >= coolBars
+bool crossUp0 = ta.crossover(mf, 0.0)
+bool crossDn0 = ta.crossunder(mf, 0.0)
+bool histUpX  = ta.crossover(hist, 0.0)
+bool histDnX  = ta.crossunder(hist, 0.0)
+
+// Zielona/czerwona kropka: przecięcie zera przez MF + potwierdzenie histogramem
+bool dotUp = showZeroDots and barstate.isconfirmed and crossUp0 and hist >= minStr and coolOk
+bool dotDn = showZeroDots and barstate.isconfirmed and crossDn0 and hist <= -minStr and coolOk
+
+// Złota/cyjanowa kropka: fala w strefie ekstremum + odwrócenie histogramu
+bool dotExtB = showExtDots and barstate.isconfirmed and mf <= -extSoft and histUpX and coolOk
+bool dotExtS = showExtDots and barstate.isconfirmed and mf >= extSoft and histDnX and coolOk
+
+// Aktualizacja cooldownu i „ostatniego sygnału” dla dashboardu
+if dotUp or dotDn or dotExtB or dotExtS
+    lastDotBar := bar_index
+    lastSigBar := bar_index
+    lastSigTxt := dotExtB ? "★ Extreme Buy" : dotExtS ? "◆ Extreme Sell" : dotUp ? "▲ Cross 0 w górę" : "▼ Cross 0 w dół"
+
+// ═════════════════════════════════════════════════════════════════════════════
+//  4. DIVERGENCES — DYWERGENCJE MF vs CENA (potwierdzone pivoty)
+// ═════════════════════════════════════════════════════════════════════════════
+
+// Zamiana tekstu z ustawień na styl linii
+f_lineStyle(string _s) =>
+    _s == "Dashed" ? line.style_dashed : _s == "Dotted" ? line.style_dotted : line.style_solid
+
+// Rysowanie dywergencji na panelu MF: linia + etykieta przy drugiej nodze
+f_div(int _x1, float _y1, int _x2, float _y2, color _c, string _sty, string _txt, bool _isBull) =>
+    line.new(_x1, _y1, _x2, _y2, color = _c, width = divWid, style = f_lineStyle(_sty))
+    label.new(_x2, _y2, _txt, style = _isBull ? label.style_label_up : label.style_label_down, color = color.new(_c, 25), textcolor = #0b1220, size = size.small)
+
+// Pivoty liczone NA FALI MF; cena (low/high) brana z bara pivota MF
+float mfPH = ta.pivothigh(mf, pivL, pivR)
+float mfPL = ta.pivotlow(mf, pivL, pivR)
+int pivBarIdx = bar_index - pivR
+
+// Stan: poprzedni potwierdzony pivot dołka / szczytu MF
+var int   plBar   = na
+var float plMf    = na
+var float plPrice = na
+var int   phBar   = na
+var float phMf    = na
+var float phPrice = na
+
+// ── Dywergencje bycze (dołki MF) ─────────────────────────────────────────────
+if not na(mfPL) and barstate.isconfirmed
+    float _mf = mfPL
+    float _pr = low[pivR]
+    if not na(plBar)
+        int  _d  = pivBarIdx - plBar
+        bool _ok = _d >= minDistD and _d <= maxDistD
+        // Regular Bull: cena niższy dołek, MF wyższy dołek
+        if _ok and showRegBull and _pr < plPrice and _mf > plMf
+            f_div(plBar, plMf, pivBarIdx, _mf, colDivBull, styDivReg, "Bull", true)
+            lastSigTxt := "Dyw. Regular Bull"
+            lastSigBar := bar_index
+        // Hidden Bull: cena wyższy dołek, MF niższy dołek
+        if _ok and showHidBull and _pr > plPrice and _mf < plMf
+            f_div(plBar, plMf, pivBarIdx, _mf, colDivBull, styDivHid, "H.Bull", true)
+            lastSigTxt := "Dyw. Hidden Bull"
+            lastSigBar := bar_index
+    plBar   := pivBarIdx
+    plMf    := _mf
+    plPrice := _pr
+
+// ── Dywergencje niedźwiedzie (szczyty MF) ────────────────────────────────────
+if not na(mfPH) and barstate.isconfirmed
+    float _mf = mfPH
+    float _pr = high[pivR]
+    if not na(phBar)
+        int  _d  = pivBarIdx - phBar
+        bool _ok = _d >= minDistD and _d <= maxDistD
+        // Regular Bear: cena wyższy szczyt, MF niższy szczyt
+        if _ok and showRegBear and _pr > phPrice and _mf < phMf
+            f_div(phBar, phMf, pivBarIdx, _mf, colDivBear, styDivReg, "Bear", false)
+            lastSigTxt := "Dyw. Regular Bear"
+            lastSigBar := bar_index
+        // Hidden Bear: cena niższy szczyt, MF wyższy szczyt
+        if _ok and showHidBear and _pr < phPrice and _mf > phMf
+            f_div(phBar, phMf, pivBarIdx, _mf, colDivBear, styDivHid, "H.Bear", false)
+            lastSigTxt := "Dyw. Hidden Bear"
+            lastSigBar := bar_index
+    phBar   := pivBarIdx
+    phMf    := _mf
+    phPrice := _pr
+
+// ═════════════════════════════════════════════════════════════════════════════
+//  5. PLOTS — RYSOWANIE PANELU
+// ═════════════════════════════════════════════════════════════════════════════
+
+// Ciemne tło panelu — premium look także na jasnym motywie wykresu
+bgcolor(darkBg ? color.new(#040a12, 8) : na, title = "Ciemne tło")
+
+// Poziomy ekstremów: delikatne, „przerywane” (kropkowane przez style_circles)
+color colLvlSoft = showLevels ? color.new(#8892a6, 55) : color(na)
+color colLvlHard = showLevels ? color.new(#8892a6, 35) : color(na)
+plot(extSoft, "Poziom +miękki", color = colLvlSoft, style = plot.style_circles, linewidth = 1, display = display.pane, editable = false)
+plot(-extSoft, "Poziom −miękki", color = colLvlSoft, style = plot.style_circles, linewidth = 1, display = display.pane, editable = false)
+plot(extHard, "Poziom +twardy", color = colLvlHard, style = plot.style_circles, linewidth = 1, display = display.pane, editable = false)
+plot(-extHard, "Poziom −twardy", color = colLvlHard, style = plot.style_circles, linewidth = 1, display = display.pane, editable = false)
+
+// Wyraźna linia zero
+pZero = plot(0, "Zero", color = colZero, linewidth = 2, display = display.pane, editable = false)
+
+// Histogram momentum (MF − sygnał): jasny gdy siła narasta, ciemny gdy słabnie
+bool  histGrow = math.abs(hist) >= math.abs(nz(hist[1]))
+color histCol  = hist >= 0 ? (histGrow ? colHistUp : color.new(colHistUp, 60)) : (histGrow ? colHistDn : color.new(colHistDn, 60))
+plot(showHist ? hist : na, "Histogram", style = plot.style_columns, color = histCol)
+
+// Gradientowe wypełnienie fali do zera — osobno nad i pod zerem.
+// Plots pomocnicze są niewidoczne (color=na), służą wyłącznie do fill()
+pPos = plot(math.max(mf, 0.0), color = color(na), display = display.pane, editable = false)
+pZp  = plot(0.0, color = color(na), display = display.pane, editable = false)
+pNeg = plot(math.min(mf, 0.0), color = color(na), display = display.pane, editable = false)
+pZn  = plot(0.0, color = color(na), display = display.pane, editable = false)
+// nad zerem: teal przy zerze → lime przy +100
+fill(pPos, pZp, top_value = 100.0, bottom_value = 0.0, top_color = color.new(colBull, fillTransp), bottom_color = color.new(colBullDeep, math.min(100, fillTransp + 25)), title = "Fill bycze")
+// pod zerem: maroon przy zerze → red przy −100
+fill(pNeg, pZn, top_value = 0.0, bottom_value = -100.0, top_color = color.new(colBearDeep, math.min(100, fillTransp + 25)), bottom_color = color.new(colBear, fillTransp), title = "Fill niedźwiedzie")
+
+// Fala MF: opcjonalny „glow” pod spodem + gruba linia główna + cienki sygnał
+color waveCol = mf >= 0 ? colBull : colBear
+plot(glowOn ? mf : na, "MF Glow", color = color.new(waveCol, 80), linewidth = 8, display = display.pane, editable = false)
+plot(mf, "Money Flow", color = waveCol, linewidth = 3)
+plot(sig, "Signal", color = colSignal, linewidth = 1)
+
+// Kropki sygnałowe — rysowane na fali, czytelne i nienachalne
+plot(dotUp ? mf : na, "Kropka: cross w górę", style = plot.style_circles, linewidth = 4, color = colBull, display = display.pane)
+plot(dotDn ? mf : na, "Kropka: cross w dół", style = plot.style_circles, linewidth = 4, color = colBear, display = display.pane)
+plot(dotExtB ? mf : na, "Kropka: Extreme Buy", style = plot.style_circles, linewidth = 5, color = colGold, display = display.pane)
+plot(dotExtS ? mf : na, "Kropka: Extreme Sell", style = plot.style_circles, linewidth = 5, color = colCyan, display = display.pane)
+
+// ═════════════════════════════════════════════════════════════════════════════
+//  6. TABLE — DASHBOARD
+// ═════════════════════════════════════════════════════════════════════════════
+
+// Mapowanie pozycji dashboardu z ustawień
+f_pos(simple string _p) =>
+    switch _p
+        "Góra-lewo" => position.top_left
+        "Dół-prawo" => position.bottom_right
+        "Dół-lewo"  => position.bottom_left
+        => position.top_right
+
+// Słowny opis siły przepływu względem stref ekstremów
+f_strength(float _v) =>
+    float _a = math.abs(_v)
+    _a >= extHard ? "EKSTREMALNY" : _a >= extSoft ? "SILNY" : _a >= neutralZone ? "UMIARKOWANY" : "SŁABY"
+
+var table dash = na
+if showDash and barstate.islast
+    // tworzenie tabeli tylko raz
+    if na(dash)
+        dash := table.new(f_pos(dashPos), 2, 6, bgcolor = color.new(#0b1220, 10), frame_width = 1, frame_color = color.new(#2a3550, 0), border_width = 1, border_color = color.new(#2a3550, 55))
+        table.merge_cells(dash, 0, 0, 1, 0)
+    // stan przepływu
+    string stateTxt = mf > neutralZone ? "BULL" : mf < -neutralZone ? "BEAR" : "NEUTRAL"
+    color  stateCol = mf > neutralZone ? colBull : mf < -neutralZone ? colBear : color.new(#9aa4b2, 0)
+    string sigCell  = lastSigTxt == "—" ? "—" : lastSigTxt + "  (" + str.tostring(bar_index - lastSigBar) + " b. temu)"
+    color  cLbl     = color.new(#9aa4b2, 0)
+    color  cVal     = color.new(#e8eaf0, 0)
+    table.cell(dash, 0, 0, "APEX MONEY FLOW", text_color = cVal, text_size = size.small, bgcolor = color.new(#151d30, 0))
+    table.cell(dash, 0, 1, "Stan", text_color = cLbl, text_size = size.tiny, text_halign = text.align_left)
+    table.cell(dash, 1, 1, stateTxt, text_color = stateCol, text_size = size.tiny, text_halign = text.align_right)
+    table.cell(dash, 0, 2, "MF", text_color = cLbl, text_size = size.tiny, text_halign = text.align_left)
+    table.cell(dash, 1, 2, str.tostring(mf, "0.00"), text_color = stateCol, text_size = size.tiny, text_halign = text.align_right)
+    table.cell(dash, 0, 3, "Od zera", text_color = cLbl, text_size = size.tiny, text_halign = text.align_left)
+    table.cell(dash, 1, 3, str.tostring(math.abs(mf), "0.00") + " • " + f_strength(mf), text_color = cVal, text_size = size.tiny, text_halign = text.align_right)
+    table.cell(dash, 0, 4, "Sygnał", text_color = cLbl, text_size = size.tiny, text_halign = text.align_left)
+    table.cell(dash, 1, 4, sigCell, text_color = cVal, text_size = size.tiny, text_halign = text.align_right)
+    table.cell(dash, 0, 5, "Wolumen", text_color = cLbl, text_size = size.tiny, text_halign = text.align_left)
+    table.cell(dash, 1, 5, hasVol ? "OK" : "BRAK — fallback cenowy", text_color = hasVol ? cVal : color.new(#ffb74d, 0), text_size = size.tiny, text_halign = text.align_right)
