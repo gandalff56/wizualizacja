@@ -1,0 +1,530 @@
+//@version=6
+// ═════════════════════════════════════════════════════════════════════════════
+//  APEX MONEY FLOW + RSI DIVERGENCE  (Pine Script v6)
+//  ───────────────────────────────────────────────────────────────────────────
+//  Połączenie dwóch wskaźników w jeden panel:
+//   • Money Flow w stylu Cipher B — gruba fala wokół 0 (−100…100), gradientowe
+//     wypełnienie, linia sygnału, histogram momentum, kropki zero-cross
+//     i extreme-reversal, dywergencje MF vs cena, dashboard
+//   • RSI z dywergencjami (regular/hidden, bull/bear) z oceną siły 0–100
+//     oraz formacją „2 cyce” (podwójny szczyt / dołek na cenie)
+//
+//  NOWOŚĆ — FILTR KIERUNKU MONEY FLOW (grupa „Filtr Money Flow”):
+//   • „Zgodny z MF”     → formacje bycze (Regular/Hidden Bull, 2 cyce dno)
+//     rysują się TYLKO, gdy Money Flow jest byczy; niedźwiedzie (Regular/
+//     Hidden Bear, 2 cyce szczyt) tylko przy niedźwiedzim MF
+//   • „Przeciwny do MF” → odwrotnie (łapanie odwróceń)
+//   • „Wyłączony”       → bez filtra
+//
+//  SKALA PANELU: −100…100. RSI jest przeskalowane do tej skali
+//  (RSI_disp = 2·RSI − 100, czyli 70→+40, 50→0, 30→−40) — jak w narzędziach
+//  typu Cipher B. Prawdziwa wartość RSI (0–100) jest w dashboardzie.
+//  Detekcje bez repaintu: pivoty potwierdzone (Pivot Right Bars), sygnały
+//  liczone po zamknięciu bara, brak request.security / lookahead.
+//  To autorski wskaźnik inspirowany estetyką Cipher B — nie oficjalny produkt.
+//  max_bars_back ustawione świadomie: pivoty + max dystans + zapas.
+// ═════════════════════════════════════════════════════════════════════════════
+indicator("Apex Money Flow + RSI", shorttitle = "Apex MF+RSI", overlay = false, precision = 2, max_bars_back = 500, max_lines_count = 500, max_labels_count = 500)
+
+// ═════════════════════════════════════════════════════════════════════════════
+//  1. INPUTS — USTAWIENIA
+// ═════════════════════════════════════════════════════════════════════════════
+
+// ── Grupa: Money Flow ────────────────────────────────────────────────────────
+gMF       = "Money Flow"
+srcIn     = input.source(hlc3, "Source", group = gMF, tooltip = "Cena użyta w mnożniku przepływu (hlc3 / ohlc4 / close).")
+mfLen     = input.int(14, "MF Length", minval = 2, group = gMF, tooltip = "Okres normalizacji przepływu wolumenu.")
+smoothLen = input.int(4, "Smooth Length", minval = 1, group = gMF, tooltip = "Dodatkowe wygładzenie — im więcej, tym grubsza i płynniejsza fala.")
+sigLen    = input.int(7, "Signal Length", minval = 1, group = gMF, tooltip = "Okres szybszej linii sygnału liczonej po fali MF.")
+maTypeIn  = input.string("EMA", "Metoda wygładzenia", options = ["EMA", "SMA", "RMA", "HMA"], group = gMF)
+
+// ── Grupa: Sygnały Money Flow ────────────────────────────────────────────────
+gSig         = "Sygnały Money Flow"
+showZeroDots = input.bool(true, "Show zero-cross dots", group = gSig, tooltip = "Kropka, gdy fala MF przecina 0, a histogram potwierdza kierunek.")
+showExtDots  = input.bool(true, "Show extreme reversal dots", group = gSig, tooltip = "Kropka złota/cyjanowa: fala w strefie ekstremum + odwrócenie histogramu.")
+minStr       = input.float(1.0, "Minimalna siła do kropki (|histogram|)", minval = 0.0, step = 0.25, group = gSig)
+coolBars     = input.int(5, "Cooldown między kropkami (bary)", minval = 0, group = gSig)
+neutralZone  = input.float(5.0, "Strefa neutralna (±)", minval = 0.0, group = gSig, tooltip = "W tym pasie wokół zera MF jest NEUTRALNY — używane przez dashboard i filtr kierunku MF.")
+extSoft      = input.float(40.0, "Ekstremum miękkie (±)", minval = 1.0, group = gSig)
+extHard      = input.float(60.0, "Ekstremum twarde (±)", minval = 1.0, group = gSig)
+
+// ── Grupa: Filtr Money Flow (NOWA) ───────────────────────────────────────────
+gFlt         = "Filtr Money Flow"
+mfFilterMode = input.string("Zgodny z MF", "Filtr kierunku dla formacji", options = ["Wyłączony", "Zgodny z MF", "Przeciwny do MF"], group = gFlt, tooltip = "Dotyczy dywergencji RSI (Regular/Hidden Bull i Bear) oraz formacji „2 cyce”.\n• Zgodny z MF: formacje bycze pojawiają się tylko, gdy Money Flow jest byczy (MF > strefa neutralna), a niedźwiedzie tylko przy niedźwiedzim MF.\n• Przeciwny do MF: odwrotnie — bycze przy niedźwiedzim MF (łapanie odwróceń).\n• Wyłączony: brak filtra.\nOcena stanu MF następuje w barze potwierdzenia formacji.")
+
+// ── Grupa: RSI ───────────────────────────────────────────────────────────────
+gRsi        = "RSI"
+rsiLen      = input.int(14, "RSI Length", minval = 2, group = gRsi)
+rsiSrc      = input.source(close, "RSI Source", group = gRsi)
+showRsiLine = input.bool(true, "Pokaż linię RSI na panelu", group = gRsi, tooltip = "RSI rysowane w skali panelu: 2·RSI − 100 (70→+40, 50→0, 30→−40). Prawdziwa wartość RSI jest w dashboardzie.")
+colRsi      = input.color(#7e57c2, "Kolor linii RSI", group = gRsi)
+
+// ── Grupa: Pivoty i filtry (wspólne dla dywergencji i 2 cyce) ────────────────
+gPiv       = "Pivoty i filtry (wspólne)"
+pivLeft    = input.int(5, "Pivot Left Bars", minval = 1, group = gPiv)
+pivRight   = input.int(5, "Pivot Right Bars", minval = 1, group = gPiv, tooltip = "Pivot (i sygnał) potwierdza się dopiero po tylu barach — ochrona przed repaintem.")
+minDist    = input.int(5, "Min. odległość między pivotami (bary)", minval = 1, group = gPiv)
+maxDist    = input.int(60, "Max. odległość między pivotami (bary)", minval = 2, group = gPiv)
+minRsiDiff = input.float(1.0, "Min. różnica RSI między pivotami", minval = 0.0, step = 0.5, group = gPiv, tooltip = "Filtr słabych dywergencji RSI.")
+
+// ── Grupa: Siła dywergencji (RSI) ────────────────────────────────────────────
+gStr        = "Siła dywergencji (RSI)"
+minDivStr   = input.float(0.0, "Min. siła dywergencji (0–100)", minval = 0.0, maxval = 100.0, step = 5.0, group = gStr, tooltip = "Każda dywergencja RSI dostaje ocenę siły 0–100 (50 pkt za rozjazd RSI + 50 pkt za ruch ceny). Słabsze niż próg są pomijane; 0 = brak filtra.")
+showStrDiv  = input.bool(true, "Pokaż siłę w etykiecie", group = gStr, tooltip = "Dopisuje ocenę siły do etykiety, np. „Bull 72”.")
+strRsiScale = input.float(20.0, "Skala RSI: ΔRSI = pełne 50 pkt", minval = 1.0, step = 1.0, group = gStr)
+strPrcScale = input.float(5.0, "Skala ceny: Δcena % = pełne 50 pkt", minval = 0.1, step = 0.1, group = gStr)
+
+// ── Grupa: Dywergencje RSI (kolor / styl / grubość) ──────────────────────────
+gDivR = "Dywergencje RSI"
+showRegBull = input.bool(true, "Show Regular Bull", inline = "r1", group = gDivR, tooltip = "Zwykła bycza: cena LL, RSI HL.")
+colRegBull  = input.color(#089981, "", inline = "r1", group = gDivR)
+styRegBull  = input.string("Solid", "", options = ["Solid", "Dashed", "Dotted"], inline = "r1", group = gDivR)
+widRegBull  = input.int(2, "", minval = 1, maxval = 5, inline = "r1", group = gDivR)
+
+showHidBull = input.bool(true, "Show Hidden Bull", inline = "r2", group = gDivR, tooltip = "Ukryta bycza: cena HL, RSI LL.")
+colHidBull  = input.color(#00bcd4, "", inline = "r2", group = gDivR)
+styHidBull  = input.string("Dashed", "", options = ["Solid", "Dashed", "Dotted"], inline = "r2", group = gDivR)
+widHidBull  = input.int(1, "", minval = 1, maxval = 5, inline = "r2", group = gDivR)
+
+showHidBear = input.bool(true, "Show Hidden Bear", inline = "r3", group = gDivR, tooltip = "Ukryta niedźwiedzia: cena LH, RSI HH.")
+colHidBear  = input.color(#ff9800, "", inline = "r3", group = gDivR)
+styHidBear  = input.string("Dashed", "", options = ["Solid", "Dashed", "Dotted"], inline = "r3", group = gDivR)
+widHidBear  = input.int(1, "", minval = 1, maxval = 5, inline = "r3", group = gDivR)
+
+showRegBear = input.bool(true, "Show Regular Bear", inline = "r4", group = gDivR, tooltip = "Zwykła niedźwiedzia: cena HH, RSI LH.")
+colRegBear  = input.color(#f23645, "", inline = "r4", group = gDivR)
+styRegBear  = input.string("Solid", "", options = ["Solid", "Dashed", "Dotted"], inline = "r4", group = gDivR)
+widRegBear  = input.int(2, "", minval = 1, maxval = 5, inline = "r4", group = gDivR)
+
+// ── Grupa: Dywergencje Money Flow ────────────────────────────────────────────
+gDivM        = "Dywergencje Money Flow"
+showMfRegBull = input.bool(true, "MF Regular Bull", inline = "m1", group = gDivM)
+showMfHidBull = input.bool(true, "MF Hidden Bull", inline = "m1", group = gDivM)
+showMfRegBear = input.bool(true, "MF Regular Bear", inline = "m2", group = gDivM)
+showMfHidBear = input.bool(true, "MF Hidden Bear", inline = "m2", group = gDivM)
+colMfDivBull  = input.color(#ffeb3b, "Kolor bull", inline = "m3", group = gDivM)
+colMfDivBear  = input.color(#e040fb, "Kolor bear", inline = "m3", group = gDivM)
+styMfDivReg   = input.string("Solid", "Styl regular", options = ["Solid", "Dashed", "Dotted"], inline = "m4", group = gDivM)
+styMfDivHid   = input.string("Dashed", "Styl hidden", options = ["Solid", "Dashed", "Dotted"], inline = "m4", group = gDivM)
+mfDivWid      = input.int(1, "Grubość linii", minval = 1, maxval = 4, group = gDivM)
+
+// ── Grupa: Formacja „2 cyce” ─────────────────────────────────────────────────
+grp2c    = "Formacja „2 cyce”"
+show2c   = input.bool(true, "Show 2 Cyce", group = grp2c, tooltip = "Dwa kolejne, zbliżone wysokością szczyty (lub dołki) na cenie, z potwierdzonym dołkiem (szczytem) pomiędzy nimi. Podlega filtrowi kierunku MF.")
+tol2c    = input.float(0.5, "Tolerancja wysokości (%)", minval = 0.05, maxval = 5.0, step = 0.05, group = grp2c)
+col2cTop = input.color(#e040fb, "Kolor: szczyty", inline = "c1", group = grp2c)
+col2cBot = input.color(#29b6f6, "Kolor: dołki", inline = "c1", group = grp2c)
+sty2c    = input.string("Dotted", "Styl", options = ["Solid", "Dashed", "Dotted"], inline = "c2", group = grp2c)
+wid2c    = input.int(2, "Grubość", minval = 1, maxval = 5, inline = "c2", group = grp2c)
+
+// ── Grupa: Wyświetlanie ──────────────────────────────────────────────────────
+gVis0          = "Wyświetlanie"
+showPriceLines = input.bool(true, "Pokaż linie dywergencji RSI na wykresie ceny", group = gVis0, tooltip = "Oprócz panelu dywergencje RSI rysowane są też na głównym wykresie (po cenie: low/high).")
+showLabels     = input.bool(true, "Pokaż etykiety", group = gVis0, tooltip = "Etykiety przy drugiej nodze formacji (dywergencje i 2 cyce).")
+
+// ── Grupa: Poziomy RSI ───────────────────────────────────────────────────────
+gLvlR         = "Poziomy RSI"
+showRsiLevels = input.bool(true, "Pokaż poziomy RSI (70 / 50 / 30)", group = gLvlR, tooltip = "Rysowane w skali panelu: 70→+40, 50→0, 30→−40.")
+lvlOB         = input.float(70.0, "Poziom wykupienia", minval = 50.0, maxval = 100.0, group = gLvlR)
+lvlMid        = input.float(50.0, "Poziom środkowy", minval = 0.0, maxval = 100.0, group = gLvlR)
+lvlOS         = input.float(30.0, "Poziom wyprzedania", minval = 0.0, maxval = 50.0, group = gLvlR)
+showRsiFill   = input.bool(false, "Wypełnienie strefy 30–70", group = gLvlR)
+colRsiFill    = input.color(color.new(#7e57c2, 92), "Kolor wypełnienia", group = gLvlR)
+
+// ── Grupa: Visual Money Flow ─────────────────────────────────────────────────
+gVisM       = "Visual Money Flow"
+colBull     = input.color(#00e676, "Bull (fala / ekstremum fill)", group = gVisM)
+colBullDeep = input.color(#00796b, "Bull przy zerze (teal)", group = gVisM)
+colBear     = input.color(#ff5252, "Bear (fala / ekstremum fill)", group = gVisM)
+colBearDeep = input.color(#6d1b1b, "Bear przy zerze (maroon)", group = gVisM)
+colSignal   = input.color(#e8eaf0, "Linia sygnału", group = gVisM)
+colHistUp   = input.color(#3b82f6, "Histogram dodatni", inline = "vh", group = gVisM)
+colHistDn   = input.color(#f97316, "Histogram ujemny", inline = "vh", group = gVisM)
+colGold     = input.color(#ffd700, "Kropka Extreme Buy", inline = "vd", group = gVisM)
+colCyan     = input.color(#00e5ff, "Kropka Extreme Sell", inline = "vd", group = gVisM)
+colZero     = input.color(#78828e, "Linia zero", group = gVisM)
+fillTransp  = input.int(55, "Transparency fill (0–95)", minval = 0, maxval = 95, group = gVisM)
+glowOn      = input.bool(true, "Glow pod falą", group = gVisM)
+showHist    = input.bool(true, "Show histogram", group = gVisM)
+showMfLevels = input.bool(true, "Show levels MF (ekstrema)", group = gVisM)
+showDash    = input.bool(true, "Show dashboard", group = gVisM)
+dashPos     = input.string("Góra-prawo", "Pozycja dashboardu", options = ["Góra-prawo", "Góra-lewo", "Dół-prawo", "Dół-lewo"], group = gVisM)
+darkBg      = input.bool(true, "Ciemne tło panelu", group = gVisM)
+
+// ═════════════════════════════════════════════════════════════════════════════
+//  2. CALC — OBLICZENIA I FUNKCJE POMOCNICZE
+// ═════════════════════════════════════════════════════════════════════════════
+
+// Uniwersalna średnia — metoda wybierana w ustawieniach
+f_ma(float _src, simple int _len, simple string _type) =>
+    switch _type
+        "EMA" => ta.ema(_src, _len)
+        "SMA" => ta.sma(_src, _len)
+        "RMA" => ta.rma(_src, _len)
+        => ta.hma(_src, _len)
+
+// ── RSI ──────────────────────────────────────────────────────────────────────
+rsiVal = ta.rsi(rsiSrc, rsiLen)
+
+// ── Money Flow ───────────────────────────────────────────────────────────────
+// Fallback wolumenu: symbol bez wolumenu → stała 1.0 (flow czysto cenowy)
+bool  hasVol = not na(volume)
+float vol    = hasVol ? volume : 1.0
+
+// Mnożnik przepływu (rodzina Chaikin): pozycja źródła wewnątrz bara, −1…+1
+float hlRange = high - low
+float mult    = hlRange > 0 ? (2.0 * srcIn - high - low) / hlRange : 0.0
+float rawFlow = mult * vol
+
+// Normalizacja do ~ −100…100 i wygładzenie do fali + sygnał + histogram
+float flowMa    = f_ma(rawFlow, mfLen, maTypeIn)
+float flowAbsMa = f_ma(math.abs(rawFlow), mfLen, maTypeIn)
+float mfCoreRaw = flowAbsMa > 0 ? 100.0 * flowMa / flowAbsMa : 0.0
+float mfCore    = math.max(-100.0, math.min(100.0, mfCoreRaw))
+float mf   = f_ma(mfCore, smoothLen, maTypeIn)
+float sig  = f_ma(mf, sigLen, maTypeIn)
+float hist = mf - sig
+
+// ── Stan MF i filtr kierunku ─────────────────────────────────────────────────
+// 1 = byk (MF > strefa neutralna), −1 = niedźwiedź, 0 = neutralny
+int mfState = mf > neutralZone ? 1 : mf < -neutralZone ? -1 : 0
+// Zgoda na formacje bycze / niedźwiedzie wg trybu filtra (dywergencje RSI + 2 cyce)
+bool allowBull = mfFilterMode == "Wyłączony" or (mfFilterMode == "Zgodny z MF" ? mfState == 1 : mfState == -1)
+bool allowBear = mfFilterMode == "Wyłączony" or (mfFilterMode == "Zgodny z MF" ? mfState == -1 : mfState == 1)
+
+// ── Pivoty (wartość != na tylko w barze POTWIERDZENIA pivota) ────────────────
+rsiPH   = ta.pivothigh(rsiVal, pivLeft, pivRight)   // pivoty na RSI (dywergencje RSI)
+rsiPL   = ta.pivotlow(rsiVal, pivLeft, pivRight)
+mfDivPH = ta.pivothigh(mf, pivLeft, pivRight)       // pivoty na fali MF (dywergencje MF)
+mfDivPL = ta.pivotlow(mf, pivLeft, pivRight)
+prcPH   = ta.pivothigh(high, pivLeft, pivRight)     // pivoty na cenie („2 cyce”)
+prcPL   = ta.pivotlow(low, pivLeft, pivRight)
+prcPhFound = not na(prcPH)
+prcPlFound = not na(prcPL)
+
+// Indeks bara, na którym faktycznie wypadł potwierdzany właśnie pivot
+pivBar = bar_index - pivRight
+
+// ── Funkcje pomocnicze ───────────────────────────────────────────────────────
+// Zamiana tekstu z ustawień na styl linii
+f_style(string _s) =>
+    _s == "Dashed" ? line.style_dashed : _s == "Dotted" ? line.style_dotted : line.style_solid
+
+// Procentowa różnica dwóch wartości względem ich średniej (2 cyce)
+f_diffPct(float _a, float _b) =>
+    math.abs(_a - _b) / ((_a + _b) / 2.0) * 100.0
+
+// Siła dywergencji RSI 0–100: 50 pkt za rozjazd RSI + 50 pkt za ruch ceny
+f_divStrength(float _r1, float _r2, float _p1, float _p2) =>
+    float _dRsi = math.abs(_r2 - _r1)
+    float _dPrc = _p1 != 0 ? math.abs(_p2 - _p1) / math.abs(_p1) * 100.0 : 0.0
+    math.min(_dRsi / strRsiScale, 1.0) * 50.0 + math.min(_dPrc / strPrcScale, 1.0) * 50.0
+
+// Przeskalowanie RSI (0–100) do skali panelu (−100…100)
+f_rsiY(float _r) =>
+    2.0 * _r - 100.0
+
+// Dywergencja RSI: linia na panelu (w skali panelu) + opcjonalnie na cenie
+// + etykiety przy drugiej nodze (opcjonalnie z oceną siły)
+f_drawDivRsi(int _x1, float _r1, float _p1, int _x2, float _r2, float _p2, color _col, string _sty, int _wid, string _txt, bool _isBull, float _str) =>
+    _style = f_style(_sty)
+    _lblStyle = _isBull ? label.style_label_up : label.style_label_down
+    string _lblTxt = showStrDiv ? _txt + " " + str.tostring(_str, "#") : _txt
+    line.new(_x1, f_rsiY(_r1), _x2, f_rsiY(_r2), color = _col, width = _wid, style = _style)
+    if showPriceLines
+        line.new(_x1, _p1, _x2, _p2, color = _col, width = _wid, style = _style, force_overlay = true)
+    if showLabels
+        label.new(_x2, f_rsiY(_r2), _lblTxt, style = _lblStyle, color = color.new(_col, 20), textcolor = color.white, size = size.small)
+        if showPriceLines
+            label.new(_x2, _p2, _lblTxt, style = _lblStyle, color = color.new(_col, 20), textcolor = color.white, size = size.small, force_overlay = true)
+
+// Dywergencja MF: linia + etykieta na panelu (natywna skala fali)
+f_drawDivMf(int _x1, float _y1, int _x2, float _y2, color _c, string _sty, string _txt, bool _isBull) =>
+    line.new(_x1, _y1, _x2, _y2, color = _c, width = mfDivWid, style = f_style(_sty))
+    if showLabels
+        label.new(_x2, _y2, _txt, style = _isBull ? label.style_label_up : label.style_label_down, color = color.new(_c, 25), textcolor = #0b1220, size = size.small)
+
+// ═════════════════════════════════════════════════════════════════════════════
+//  3. SIGNALS — KROPKI MF (po zamknięciu bara, bez repaintu)
+// ═════════════════════════════════════════════════════════════════════════════
+
+var int    lastDotBar = na
+var int    lastSigBar = na
+var string lastSigTxt = "—"
+
+bool coolOk   = na(lastDotBar) or bar_index - lastDotBar >= coolBars
+bool crossUp0 = ta.crossover(mf, 0.0)
+bool crossDn0 = ta.crossunder(mf, 0.0)
+bool histUpX  = ta.crossover(hist, 0.0)
+bool histDnX  = ta.crossunder(hist, 0.0)
+
+// Zielona/czerwona kropka: przecięcie zera przez MF + potwierdzenie histogramem
+bool dotUp = showZeroDots and barstate.isconfirmed and crossUp0 and hist >= minStr and coolOk
+bool dotDn = showZeroDots and barstate.isconfirmed and crossDn0 and hist <= -minStr and coolOk
+// Złota/cyjanowa kropka: ekstremum + odwrócenie histogramu
+bool dotExtB = showExtDots and barstate.isconfirmed and mf <= -extSoft and histUpX and coolOk
+bool dotExtS = showExtDots and barstate.isconfirmed and mf >= extSoft and histDnX and coolOk
+
+if dotUp or dotDn or dotExtB or dotExtS
+    lastDotBar := bar_index
+    lastSigBar := bar_index
+    lastSigTxt := dotExtB ? "★ Extreme Buy" : dotExtS ? "◆ Extreme Sell" : dotUp ? "▲ Cross 0 w górę" : "▼ Cross 0 w dół"
+
+// ═════════════════════════════════════════════════════════════════════════════
+//  4. DIVERGENCES — DYWERGENCJE RSI, DYWERGENCJE MF, FORMACJA „2 CYCE”
+// ═════════════════════════════════════════════════════════════════════════════
+
+// Stan: ostatnie potwierdzone pivoty RSI
+var int   rsiPlBar   = na
+var float rsiPlVal   = na
+var float rsiPlPrice = na
+var int   rsiPhBar   = na
+var float rsiPhVal   = na
+var float rsiPhPrice = na
+
+// Stan: ostatnie potwierdzone pivoty fali MF
+var int   mfPlBar   = na
+var float mfPlVal   = na
+var float mfPlPrice = na
+var int   mfPhBar   = na
+var float mfPhVal   = na
+var float mfPhPrice = na
+
+// Stan: ostatnie potwierdzone pivoty CENOWE („2 cyce”)
+var int   prcPhBar = na
+var float prcPhVal = na
+var int   prcPlBar = na
+var float prcPlVal = na
+
+// ── Dywergencje RSI — bycze (filtr kierunku MF: allowBull) ───────────────────
+if not na(rsiPL) and barstate.isconfirmed
+    float _rsi   = rsiPL
+    float _price = low[pivRight]
+    if not na(rsiPlBar)
+        int   _dist = pivBar - rsiPlBar
+        float _str  = f_divStrength(rsiPlVal, _rsi, rsiPlPrice, _price)
+        bool  _ok   = _dist >= minDist and _dist <= maxDist and math.abs(_rsi - rsiPlVal) >= minRsiDiff and _str >= minDivStr and allowBull
+        // Regular Bullish: cena LL, RSI HL
+        if _ok and showRegBull and _price < rsiPlPrice and _rsi > rsiPlVal
+            f_drawDivRsi(rsiPlBar, rsiPlVal, rsiPlPrice, pivBar, _rsi, _price, colRegBull, styRegBull, widRegBull, "Bull", true, _str)
+            lastSigTxt := "RSI Regular Bull"
+            lastSigBar := bar_index
+        // Hidden Bullish: cena HL, RSI LL
+        if _ok and showHidBull and _price > rsiPlPrice and _rsi < rsiPlVal
+            f_drawDivRsi(rsiPlBar, rsiPlVal, rsiPlPrice, pivBar, _rsi, _price, colHidBull, styHidBull, widHidBull, "H.Bull", true, _str)
+            lastSigTxt := "RSI Hidden Bull"
+            lastSigBar := bar_index
+    rsiPlBar   := pivBar
+    rsiPlVal   := _rsi
+    rsiPlPrice := _price
+
+// ── Dywergencje RSI — niedźwiedzie (filtr kierunku MF: allowBear) ────────────
+if not na(rsiPH) and barstate.isconfirmed
+    float _rsi   = rsiPH
+    float _price = high[pivRight]
+    if not na(rsiPhBar)
+        int   _dist = pivBar - rsiPhBar
+        float _str  = f_divStrength(rsiPhVal, _rsi, rsiPhPrice, _price)
+        bool  _ok   = _dist >= minDist and _dist <= maxDist and math.abs(_rsi - rsiPhVal) >= minRsiDiff and _str >= minDivStr and allowBear
+        // Regular Bearish: cena HH, RSI LH
+        if _ok and showRegBear and _price > rsiPhPrice and _rsi < rsiPhVal
+            f_drawDivRsi(rsiPhBar, rsiPhVal, rsiPhPrice, pivBar, _rsi, _price, colRegBear, styRegBear, widRegBear, "Bear", false, _str)
+            lastSigTxt := "RSI Regular Bear"
+            lastSigBar := bar_index
+        // Hidden Bearish: cena LH, RSI HH
+        if _ok and showHidBear and _price < rsiPhPrice and _rsi > rsiPhVal
+            f_drawDivRsi(rsiPhBar, rsiPhVal, rsiPhPrice, pivBar, _rsi, _price, colHidBear, styHidBear, widHidBear, "H.Bear", false, _str)
+            lastSigTxt := "RSI Hidden Bear"
+            lastSigBar := bar_index
+    rsiPhBar   := pivBar
+    rsiPhVal   := _rsi
+    rsiPhPrice := _price
+
+// ── Dywergencje MF — bycze (bez filtra kierunku: to sygnały samego MF) ───────
+if not na(mfDivPL) and barstate.isconfirmed
+    float _mfv = mfDivPL
+    float _pr  = low[pivRight]
+    if not na(mfPlBar)
+        int  _d  = pivBar - mfPlBar
+        bool _ok = _d >= minDist and _d <= maxDist
+        if _ok and showMfRegBull and _pr < mfPlPrice and _mfv > mfPlVal
+            f_drawDivMf(mfPlBar, mfPlVal, pivBar, _mfv, colMfDivBull, styMfDivReg, "MF Bull", true)
+            lastSigTxt := "MF Regular Bull"
+            lastSigBar := bar_index
+        if _ok and showMfHidBull and _pr > mfPlPrice and _mfv < mfPlVal
+            f_drawDivMf(mfPlBar, mfPlVal, pivBar, _mfv, colMfDivBull, styMfDivHid, "MF H.Bull", true)
+            lastSigTxt := "MF Hidden Bull"
+            lastSigBar := bar_index
+    mfPlBar   := pivBar
+    mfPlVal   := _mfv
+    mfPlPrice := _pr
+
+// ── Dywergencje MF — niedźwiedzie ────────────────────────────────────────────
+if not na(mfDivPH) and barstate.isconfirmed
+    float _mfv = mfDivPH
+    float _pr  = high[pivRight]
+    if not na(mfPhBar)
+        int  _d  = pivBar - mfPhBar
+        bool _ok = _d >= minDist and _d <= maxDist
+        if _ok and showMfRegBear and _pr > mfPhPrice and _mfv < mfPhVal
+            f_drawDivMf(mfPhBar, mfPhVal, pivBar, _mfv, colMfDivBear, styMfDivReg, "MF Bear", false)
+            lastSigTxt := "MF Regular Bear"
+            lastSigBar := bar_index
+        if _ok and showMfHidBear and _pr < mfPhPrice and _mfv > mfPhVal
+            f_drawDivMf(mfPhBar, mfPhVal, pivBar, _mfv, colMfDivBear, styMfDivHid, "MF H.Bear", false)
+            lastSigTxt := "MF Hidden Bear"
+            lastSigBar := bar_index
+    mfPhBar   := pivBar
+    mfPhVal   := _mfv
+    mfPhPrice := _pr
+
+// ── „2 cyce” — podwójny SZCZYT (formacja niedźwiedzia → filtr allowBear) ─────
+if prcPhFound and show2c and barstate.isconfirmed and not na(prcPhBar)
+    float _v        = prcPH
+    int   _dist     = pivBar - prcPhBar
+    bool  _valleyOk = not na(prcPlBar) and prcPlBar > prcPhBar          // dołek pomiędzy szczytami
+    bool  _heightOk = f_diffPct(_v, prcPhVal) <= tol2c                  // zbliżona wysokość szczytów
+    if _dist >= minDist and _dist <= maxDist and _heightOk and _valleyOk and allowBear
+        line.new(prcPhBar, prcPhVal, pivBar, _v, color = col2cTop, width = wid2c, style = f_style(sty2c), force_overlay = true)
+        if showLabels
+            label.new(pivBar, _v, "2 cyce", style = label.style_label_down, color = color.new(col2cTop, 20), textcolor = color.white, size = size.small, force_overlay = true)
+        lastSigTxt := "2 cyce (szczyt)"
+        lastSigBar := bar_index
+
+// ── „2 cyce” — podwójny DOŁEK (formacja bycza → filtr allowBull) ─────────────
+if prcPlFound and show2c and barstate.isconfirmed and not na(prcPlBar)
+    float _v       = prcPL
+    int   _dist    = pivBar - prcPlBar
+    bool  _peakOk  = not na(prcPhBar) and prcPhBar > prcPlBar           // szczyt pomiędzy dołkami
+    bool  _depthOk = f_diffPct(_v, prcPlVal) <= tol2c                   // zbliżona głębokość dołków
+    if _dist >= minDist and _dist <= maxDist and _depthOk and _peakOk and allowBull
+        line.new(prcPlBar, prcPlVal, pivBar, _v, color = col2cBot, width = wid2c, style = f_style(sty2c), force_overlay = true)
+        if showLabels
+            label.new(pivBar, _v, "2 cyce (dno)", style = label.style_label_up, color = color.new(col2cBot, 20), textcolor = color.white, size = size.small, force_overlay = true)
+        lastSigTxt := "2 cyce (dno)"
+        lastSigBar := bar_index
+
+// Aktualizacja stanu pivotów cenowych — celowo PO detekcji
+if prcPhFound and barstate.isconfirmed
+    prcPhBar := pivBar
+    prcPhVal := prcPH
+if prcPlFound and barstate.isconfirmed
+    prcPlBar := pivBar
+    prcPlVal := prcPL
+
+// ═════════════════════════════════════════════════════════════════════════════
+//  5. PLOTS — RYSOWANIE PANELU
+// ═════════════════════════════════════════════════════════════════════════════
+
+// Ciemne tło panelu
+bgcolor(darkBg ? color.new(#040a12, 8) : na, title = "Ciemne tło")
+
+// Poziomy ekstremów MF: delikatne, kropkowane
+color colLvlSoft = showMfLevels ? color.new(#8892a6, 55) : color(na)
+color colLvlHard = showMfLevels ? color.new(#8892a6, 35) : color(na)
+plot(extSoft, "MF +miękki", color = colLvlSoft, style = plot.style_circles, linewidth = 1, display = display.pane, editable = false)
+plot(-extSoft, "MF −miękki", color = colLvlSoft, style = plot.style_circles, linewidth = 1, display = display.pane, editable = false)
+plot(extHard, "MF +twardy", color = colLvlHard, style = plot.style_circles, linewidth = 1, display = display.pane, editable = false)
+plot(-extHard, "MF −twardy", color = colLvlHard, style = plot.style_circles, linewidth = 1, display = display.pane, editable = false)
+
+// Poziomy RSI w skali panelu (70→+40, 50→0, 30→−40) + opcjonalne wypełnienie
+color colLvlRsi = color.new(colRsi, 60)
+pObT = plot(showRsiLevels ? f_rsiY(lvlOB) : na, "RSI 70", color = colLvlRsi, style = plot.style_circles, linewidth = 1, display = display.pane, editable = false)
+plot(showRsiLevels ? f_rsiY(lvlMid) : na, "RSI 50", color = color.new(colRsi, 80), style = plot.style_circles, linewidth = 1, display = display.pane, editable = false)
+pOsT = plot(showRsiLevels ? f_rsiY(lvlOS) : na, "RSI 30", color = colLvlRsi, style = plot.style_circles, linewidth = 1, display = display.pane, editable = false)
+fill(pObT, pOsT, color = showRsiFill and showRsiLevels ? colRsiFill : color(na), title = "Strefa RSI 30–70")
+
+// Wyraźna linia zero (wspólna: MF 0 ↔ RSI 50)
+plot(0, "Zero", color = colZero, linewidth = 2, display = display.pane, editable = false)
+
+// Histogram momentum MF: jasny gdy siła narasta, ciemny gdy słabnie
+bool  histGrow = math.abs(hist) >= math.abs(nz(hist[1]))
+color histCol  = hist >= 0 ? (histGrow ? colHistUp : color.new(colHistUp, 60)) : (histGrow ? colHistDn : color.new(colHistDn, 60))
+plot(showHist ? hist : na, "Histogram MF", style = plot.style_columns, color = histCol)
+
+// Gradientowe wypełnienie fali MF do zera (plots pomocnicze niewidoczne)
+pPos = plot(math.max(mf, 0.0), color = color(na), display = display.pane, editable = false)
+pZp  = plot(0.0, color = color(na), display = display.pane, editable = false)
+pNeg = plot(math.min(mf, 0.0), color = color(na), display = display.pane, editable = false)
+pZn  = plot(0.0, color = color(na), display = display.pane, editable = false)
+fill(pPos, pZp, top_value = 100.0, bottom_value = 0.0, top_color = color.new(colBull, fillTransp), bottom_color = color.new(colBullDeep, math.min(100, fillTransp + 25)), title = "Fill bycze")
+fill(pNeg, pZn, top_value = 0.0, bottom_value = -100.0, top_color = color.new(colBearDeep, math.min(100, fillTransp + 25)), bottom_color = color.new(colBear, fillTransp), title = "Fill niedźwiedzie")
+
+// Fala MF: glow + linia główna + linia sygnału
+color waveCol = mf >= 0 ? colBull : colBear
+plot(glowOn ? mf : na, "MF Glow", color = color.new(waveCol, 80), linewidth = 8, display = display.pane, editable = false)
+plot(mf, "Money Flow", color = waveCol, linewidth = 3)
+plot(sig, "Signal MF", color = colSignal, linewidth = 1)
+
+// RSI przeskalowane do panelu (prawdziwa wartość w dashboardzie)
+plot(showRsiLine ? f_rsiY(rsiVal) : na, "RSI (przeskalowane)", color = colRsi, linewidth = 2)
+
+// Kropki sygnałowe MF
+plot(dotUp ? mf : na, "Kropka: cross w górę", style = plot.style_circles, linewidth = 4, color = colBull, display = display.pane)
+plot(dotDn ? mf : na, "Kropka: cross w dół", style = plot.style_circles, linewidth = 4, color = colBear, display = display.pane)
+plot(dotExtB ? mf : na, "Kropka: Extreme Buy", style = plot.style_circles, linewidth = 5, color = colGold, display = display.pane)
+plot(dotExtS ? mf : na, "Kropka: Extreme Sell", style = plot.style_circles, linewidth = 5, color = colCyan, display = display.pane)
+
+// ═════════════════════════════════════════════════════════════════════════════
+//  6. TABLE — DASHBOARD
+// ═════════════════════════════════════════════════════════════════════════════
+
+f_pos(simple string _p) =>
+    switch _p
+        "Góra-lewo" => position.top_left
+        "Dół-prawo" => position.bottom_right
+        "Dół-lewo"  => position.bottom_left
+        => position.top_right
+
+// Słowny opis siły przepływu względem stref ekstremów
+f_mfWord(float _v) =>
+    float _a = math.abs(_v)
+    _a >= extHard ? "EKSTREMALNY" : _a >= extSoft ? "SILNY" : _a >= neutralZone ? "UMIARKOWANY" : "SŁABY"
+
+var table dash = na
+if showDash and barstate.islast
+    if na(dash)
+        dash := table.new(f_pos(dashPos), 2, 8, bgcolor = color.new(#0b1220, 10), frame_width = 1, frame_color = color.new(#2a3550, 0), border_width = 1, border_color = color.new(#2a3550, 55))
+        table.merge_cells(dash, 0, 0, 1, 0)
+    string stateTxt = mfState == 1 ? "BULL" : mfState == -1 ? "BEAR" : "NEUTRAL"
+    color  stateCol = mfState == 1 ? colBull : mfState == -1 ? colBear : color.new(#9aa4b2, 0)
+    string sigCell  = lastSigTxt == "—" ? "—" : lastSigTxt + "  (" + str.tostring(bar_index - lastSigBar) + " b. temu)"
+    color  cLbl     = color.new(#9aa4b2, 0)
+    color  cVal     = color.new(#e8eaf0, 0)
+    table.cell(dash, 0, 0, "APEX MF + RSI", text_color = cVal, text_size = size.small, bgcolor = color.new(#151d30, 0))
+    table.cell(dash, 0, 1, "Stan MF", text_color = cLbl, text_size = size.tiny, text_halign = text.align_left)
+    table.cell(dash, 1, 1, stateTxt, text_color = stateCol, text_size = size.tiny, text_halign = text.align_right)
+    table.cell(dash, 0, 2, "MF", text_color = cLbl, text_size = size.tiny, text_halign = text.align_left)
+    table.cell(dash, 1, 2, str.tostring(mf, "0.00"), text_color = stateCol, text_size = size.tiny, text_halign = text.align_right)
+    table.cell(dash, 0, 3, "Od zera", text_color = cLbl, text_size = size.tiny, text_halign = text.align_left)
+    table.cell(dash, 1, 3, str.tostring(math.abs(mf), "0.00") + " • " + f_mfWord(mf), text_color = cVal, text_size = size.tiny, text_halign = text.align_right)
+    table.cell(dash, 0, 4, "RSI", text_color = cLbl, text_size = size.tiny, text_halign = text.align_left)
+    table.cell(dash, 1, 4, str.tostring(rsiVal, "0.00"), text_color = rsiVal >= 50 ? colBull : colBear, text_size = size.tiny, text_halign = text.align_right)
+    table.cell(dash, 0, 5, "Filtr", text_color = cLbl, text_size = size.tiny, text_halign = text.align_left)
+    table.cell(dash, 1, 5, mfFilterMode, text_color = cVal, text_size = size.tiny, text_halign = text.align_right)
+    table.cell(dash, 0, 6, "Sygnał", text_color = cLbl, text_size = size.tiny, text_halign = text.align_left)
+    table.cell(dash, 1, 6, sigCell, text_color = cVal, text_size = size.tiny, text_halign = text.align_right)
+    table.cell(dash, 0, 7, "Wolumen", text_color = cLbl, text_size = size.tiny, text_halign = text.align_left)
+    table.cell(dash, 1, 7, hasVol ? "OK" : "BRAK — fallback cenowy", text_color = hasVol ? cVal : color.new(#ffb74d, 0), text_size = size.tiny, text_halign = text.align_right)
+
+// ═════════════════════════════════════════════════════════════════════════════
+//  JAK UŻYWAĆ
+// ═════════════════════════════════════════════════════════════════════════════
+// 1. Wklej kod do Pine Editor i kliknij „Add to chart”. Wszystko rysuje się
+//    w jednym panelu (skala −100…100); linie dywergencji RSI i formacja
+//    „2 cyce” dodatkowo na wykresie ceny (force_overlay).
+// 2. Filtr Money Flow (grupa „Filtr Money Flow”):
+//    • „Zgodny z MF” (domyślnie) — Bull / H.Bull / 2 cyce (dno) tylko przy
+//      byczym MF; Bear / H.Bear / 2 cyce (szczyt) tylko przy niedźwiedzim MF.
+//    • „Przeciwny do MF” — odwrotnie (szukanie odwróceń).
+//    • „Wyłączony” — formacje bez filtra.
+//    Stan MF wyznacza „Strefa neutralna (±)” — w pasie neutralnym filtrowane
+//    formacje nie są rysowane (poza trybem „Wyłączony”).
+// 3. RSI jest przeskalowane do skali panelu: 70→+40, 50→0, 30→−40 (przy
+//    domyślnych ustawieniach poziom RSI 70 pokrywa się z ekstremum MF +40).
+//    Prawdziwą wartość RSI (0–100) pokazuje dashboard.
+// 4. Sygnały powstają po potwierdzeniu pivota („Pivot Right Bars” barów po
+//    ekstremum) i po zamknięciu bara — wskaźnik nie repaintuje, ale sygnał
+//    jest z natury opóźniony.
+// 5. Wskaźnik jest narzędziem pomocniczym — nie stanowi rekomendacji
+//    inwestycyjnej. Dobierz ustawienia pod rynek i interwał.
