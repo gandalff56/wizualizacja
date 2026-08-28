@@ -10,6 +10,12 @@
 //   • Formację „2 cyce”           – dwa zbliżone szczyty (lub dołki) na cenie
 //                                    z dołkiem (szczytem) pomiędzy nimi
 //
+//  FILTR KIERUNKU MONEY FLOW: wskaźnik liczy wewnętrznie Money Flow (tą samą
+//  formułą co „Apex Money Flow”) i może pokazywać formacje bycze tylko przy
+//  byczym MF, a niedźwiedzie tylko przy niedźwiedzim (albo odwrotnie).
+//  Dzięki temu panel RSI zostaje w swojej naturalnej skali 0–100, a Apex MF
+//  może działać jako osobny panel poniżej — filtr i tak jest spójny.
+//
 //  Dywergencje liczone są na pivotach RSI (ta.pivothigh / ta.pivotlow na RSI),
 //  a formacja „2 cyce” na pivotach CENY. Sygnał powstaje dopiero po
 //  potwierdzeniu pivota (Pivot Right Bars) — bez repaintujących trików:
@@ -42,6 +48,16 @@ minDivStr   = input.float(0.0, "Min. siła dywergencji (0–100)", minval = 0.0,
 showStrDiv  = input.bool(true, "Pokaż siłę w etykiecie", group = grpStr, tooltip = "Dopisuje ocenę siły (0–100) do tekstu etykiety, np. „Bull 72”.")
 strRsiScale = input.float(20.0, "Skala RSI: ΔRSI = pełne 50 pkt", minval = 1.0, step = 1.0, group = grpStr, tooltip = "Różnica RSI między pivotami, przy której składnik RSI osiąga maksimum (50 pkt).")
 strPrcScale = input.float(5.0, "Skala ceny: Δcena % = pełne 50 pkt", minval = 0.1, step = 0.1, group = grpStr, tooltip = "Procentowa zmiana ceny między pivotami, przy której składnik cenowy osiąga maksimum (50 pkt).")
+
+// ── Filtr Money Flow ─────────────────────────────────────────────────────────
+grpFlt       = "Filtr Money Flow"
+mfFilterMode = input.string("Zgodny z MF", "Filtr kierunku dla formacji", options = ["Wyłączony", "Zgodny z MF", "Przeciwny do MF"], group = grpFlt, tooltip = "Dotyczy dywergencji RSI i formacji „2 cyce”.\n• Zgodny z MF: formacje bycze (Bull, H.Bull, 2 cyce dno) tylko gdy Money Flow jest byczy, niedźwiedzie tylko przy niedźwiedzim MF.\n• Przeciwny do MF: odwrotnie.\n• Wyłączony: bez filtra.\nMF liczony jest wewnętrznie tą samą formułą co wskaźnik „Apex Money Flow” — ustaw poniżej te same parametry co tam, a filtr będzie zgodny z panelem MF.")
+mfSrcF       = input.source(hlc3, "MF Source", group = grpFlt)
+mfLenF       = input.int(14, "MF Length", minval = 2, group = grpFlt)
+mfSmthF      = input.int(4, "MF Smooth Length", minval = 1, group = grpFlt)
+mfMaF        = input.string("EMA", "MF Metoda wygładzenia", options = ["EMA", "SMA", "RMA", "HMA"], group = grpFlt)
+mfNeutF      = input.float(5.0, "MF strefa neutralna (±)", minval = 0.0, group = grpFlt, tooltip = "W tym pasie wokół zera MF jest neutralny — filtrowane formacje nie są wtedy rysowane (poza trybem „Wyłączony”).")
+showMfState  = input.bool(true, "Pokaż stan MF w rogu panelu", group = grpFlt)
 
 // ── Dywergencje: przełączniki i style (kolor / styl / grubość) ───────────────
 grpDiv = "Dywergencje — przełączniki i style"
@@ -94,6 +110,31 @@ colFill    = input.color(color.new(#7e57c2, 90), "Kolor wypełnienia", group = g
 
 // Wartość RSI
 rsiVal = ta.rsi(rsiSrc, rsiLen)
+
+// ── Money Flow (liczony wewnętrznie — wyłącznie na potrzeby filtra) ──────────
+// Ta sama formuła co w „Apex Money Flow”: mnożnik Chaikina × wolumen,
+// znormalizowany do ~ −100…100 i wygładzony wybraną średnią
+f_ma(float _src, simple int _len, simple string _type) =>
+    switch _type
+        "EMA" => ta.ema(_src, _len)
+        "SMA" => ta.sma(_src, _len)
+        "RMA" => ta.rma(_src, _len)
+        => ta.hma(_src, _len)
+
+float volF     = na(volume) ? 1.0 : volume            // fallback przy braku wolumenu
+float hlRangeF = high - low
+float multF    = hlRangeF > 0 ? (2.0 * mfSrcF - high - low) / hlRangeF : 0.0
+float rawFlowF = multF * volF
+float flowMaF    = f_ma(rawFlowF, mfLenF, mfMaF)
+float flowAbsMaF = f_ma(math.abs(rawFlowF), mfLenF, mfMaF)
+float mfCoreF    = flowAbsMaF > 0 ? math.max(-100.0, math.min(100.0, 100.0 * flowMaF / flowAbsMaF)) : 0.0
+float mfF        = f_ma(mfCoreF, mfSmthF, mfMaF)
+
+// Stan MF: 1 = byk, −1 = niedźwiedź, 0 = neutralny (strefa ±)
+int mfState = mfF > mfNeutF ? 1 : mfF < -mfNeutF ? -1 : 0
+// Zgoda na formacje bycze / niedźwiedzie wg trybu filtra
+bool allowBull = mfFilterMode == "Wyłączony" or (mfFilterMode == "Zgodny z MF" ? mfState == 1 : mfState == -1)
+bool allowBear = mfFilterMode == "Wyłączony" or (mfFilterMode == "Zgodny z MF" ? mfState == -1 : mfState == 1)
 
 // Pivoty na RSI (do wykrywania dywergencji) — wartość różna od `na` pojawia się
 // wyłącznie w barze POTWIERDZENIA pivota, czyli pivRight barów po ekstremum
@@ -164,14 +205,14 @@ var float prcPhVal = na
 var int   prcPlBar = na
 var float prcPlVal = na
 
-// ── Dywergencje bycze (na pivotach dołków RSI) ───────────────────────────────
-if rsiPlFound
+// ── Dywergencje bycze (na pivotach dołków RSI; filtr kierunku MF: allowBull) ─
+if rsiPlFound and barstate.isconfirmed
     float _rsi   = rsiPL              // wartość RSI w dołku
     float _price = low[pivRight]      // cena (low) w barze dołka RSI
     if not na(rsiPlBar)
         int   _dist = pivBar - rsiPlBar
         float _str  = f_divStrength(rsiPlVal, _rsi, rsiPlPrice, _price)
-        bool  _ok   = _dist >= minDist and _dist <= maxDist and math.abs(_rsi - rsiPlVal) >= minRsiDiff and _str >= minDivStr
+        bool  _ok   = _dist >= minDist and _dist <= maxDist and math.abs(_rsi - rsiPlVal) >= minRsiDiff and _str >= minDivStr and allowBull
         // Regular Bullish: cena niższy dołek (LL), RSI wyższy dołek (HL)
         if _ok and showRegBull and _price < rsiPlPrice and _rsi > rsiPlVal
             f_drawDiv(rsiPlBar, rsiPlVal, rsiPlPrice, pivBar, _rsi, _price, colRegBull, styRegBull, widRegBull, "Bull", true, _str)
@@ -183,14 +224,14 @@ if rsiPlFound
     rsiPlVal   := _rsi
     rsiPlPrice := _price
 
-// ── Dywergencje niedźwiedzie (na pivotach szczytów RSI) ──────────────────────
-if rsiPhFound
+// ── Dywergencje niedźwiedzie (na pivotach szczytów RSI; filtr: allowBear) ────
+if rsiPhFound and barstate.isconfirmed
     float _rsi   = rsiPH              // wartość RSI na szczycie
     float _price = high[pivRight]     // cena (high) w barze szczytu RSI
     if not na(rsiPhBar)
         int   _dist = pivBar - rsiPhBar
         float _str  = f_divStrength(rsiPhVal, _rsi, rsiPhPrice, _price)
-        bool  _ok   = _dist >= minDist and _dist <= maxDist and math.abs(_rsi - rsiPhVal) >= minRsiDiff and _str >= minDivStr
+        bool  _ok   = _dist >= minDist and _dist <= maxDist and math.abs(_rsi - rsiPhVal) >= minRsiDiff and _str >= minDivStr and allowBear
         // Regular Bearish: cena wyższy szczyt (HH), RSI niższy szczyt (LH)
         if _ok and showRegBear and _price > rsiPhPrice and _rsi < rsiPhVal
             f_drawDiv(rsiPhBar, rsiPhVal, rsiPhPrice, pivBar, _rsi, _price, colRegBear, styRegBear, widRegBear, "Bear", false, _str)
@@ -205,24 +246,24 @@ if rsiPhFound
 // Warunki: dwa kolejne potwierdzone pivoty high na cenie o zbliżonej wysokości
 // (tolerancja %), w zadanym zakresie odległości, z potwierdzonym pivotem low
 // pomiędzy nimi. Detekcja PRZED aktualizacją stanu pivotów cenowych.
-if prcPhFound and show2c and not na(prcPhBar)
+if prcPhFound and show2c and barstate.isconfirmed and not na(prcPhBar)
     float _v        = prcPH
     int   _dist     = pivBar - prcPhBar
     bool  _valleyOk = not na(prcPlBar) and prcPlBar > prcPhBar          // dołek pomiędzy szczytami
     bool  _heightOk = f_diffPct(_v, prcPhVal) <= tol2c                  // zbliżona wysokość szczytów
-    if _dist >= minDist and _dist <= maxDist and _heightOk and _valleyOk
+    if _dist >= minDist and _dist <= maxDist and _heightOk and _valleyOk and allowBear
         // linia łącząca oba szczyty — na wykresie ceny
         line.new(prcPhBar, prcPhVal, pivBar, _v, color = col2cTop, width = wid2c, style = f_style(sty2c), force_overlay = true)
         if showLabels
             label.new(pivBar, _v, "2 cyce", style = label.style_label_down, color = color.new(col2cTop, 20), textcolor = color.white, size = size.small, force_overlay = true)
 
 // ── Formacja „2 cyce” — podwójny DOŁEK (wariant odwrócony) ───────────────────
-if prcPlFound and show2c and not na(prcPlBar)
+if prcPlFound and show2c and barstate.isconfirmed and not na(prcPlBar)
     float _v      = prcPL
     int   _dist   = pivBar - prcPlBar
     bool  _peakOk = not na(prcPhBar) and prcPhBar > prcPlBar            // szczyt pomiędzy dołkami
     bool  _depthOk = f_diffPct(_v, prcPlVal) <= tol2c                   // zbliżona głębokość dołków
-    if _dist >= minDist and _dist <= maxDist and _depthOk and _peakOk
+    if _dist >= minDist and _dist <= maxDist and _depthOk and _peakOk and allowBull
         // linia łącząca oba dołki — na wykresie ceny
         line.new(prcPlBar, prcPlVal, pivBar, _v, color = col2cBot, width = wid2c, style = f_style(sty2c), force_overlay = true)
         if showLabels
@@ -230,10 +271,10 @@ if prcPlFound and show2c and not na(prcPlBar)
 
 // Aktualizacja stanu pivotów cenowych — celowo PO detekcji, żeby porównywać
 // zawsze z poprzednim pivotem, a nie z bieżącym
-if prcPhFound
+if prcPhFound and barstate.isconfirmed
     prcPhBar := pivBar
     prcPhVal := prcPH
-if prcPlFound
+if prcPlFound and barstate.isconfirmed
     prcPlBar := pivBar
     prcPlVal := prcPL
 
@@ -251,6 +292,18 @@ pOS = plot(showLevels ? lvlOS : na, "Poziom wyprzedania", color = color.new(colo
 
 // Opcjonalne wypełnienie strefy między poziomami 70 i 30
 fill(pOB, pOS, color = showFill and showLevels ? colFill : color(na), title = "Strefa 30–70")
+
+// ═════════════════════════════════════════════════════════════════════════════
+//  5. STAN MONEY FLOW — plakietka w rogu panelu
+// ═════════════════════════════════════════════════════════════════════════════
+var table mfBox = na
+if showMfState and barstate.islast
+    // tworzenie tabeli tylko raz
+    if na(mfBox)
+        mfBox := table.new(position.top_right, 1, 1, bgcolor = color.new(#0b1220, 15), frame_width = 1, frame_color = color.new(#2a3550, 40))
+    string _stTxt = mfState == 1 ? "BULL" : mfState == -1 ? "BEAR" : "NEUTRAL"
+    color  _stCol = mfState == 1 ? color.new(#00e676, 0) : mfState == -1 ? color.new(#ff5252, 0) : color.new(#9aa4b2, 0)
+    table.cell(mfBox, 0, 0, "MF: " + _stTxt + (mfFilterMode == "Wyłączony" ? "  (filtr off)" : ""), text_color = _stCol, text_size = size.small)
 
 // ═════════════════════════════════════════════════════════════════════════════
 //  JAK UŻYWAĆ WSKAŹNIKA
@@ -277,6 +330,13 @@ fill(pOB, pOS, color = showFill and showLevels ? colFill : color(na), title = "S
 //    skale nasycenia obu składników są konfigurowalne). Suwak „Min. siła
 //    dywergencji” odsiewa sygnały poniżej progu (0 = pokazuj wszystkie),
 //    a ocena może być dopisywana do etykiety, np. „Bull 72”.
+// 4b. Filtr Money Flow: w trybie „Zgodny z MF” formacje bycze (Bull, H.Bull,
+//    2 cyce dno) rysują się tylko przy byczym MF, a niedźwiedzie (Bear,
+//    H.Bear, 2 cyce szczyt) tylko przy niedźwiedzim; „Przeciwny do MF”
+//    działa odwrotnie, „Wyłączony” wyłącza filtr. MF liczony jest
+//    wewnętrznie tą samą formułą co wskaźnik „Apex Money Flow” — jeśli masz
+//    go jako osobny panel poniżej, ustaw w obu te same parametry MF, a stan
+//    filtra (plakietka „MF: …” w rogu) będzie zgodny z falą na dole.
 // 5. Każdy typ formacji ma osobny przełącznik, kolor, styl (Solid/Dashed/
 //    Dotted) i grubość linii; linie na wykresie ceny oraz etykiety można
 //    globalnie ukryć w grupie „Wyświetlanie”.
