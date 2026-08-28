@@ -20,8 +20,15 @@
 //  histogram, kropki, dywergencje MF). Wszystko wykryte przez RSI
 //  (dywergencje z siłą) oraz „2 cyce” rysuje się na wykresie głównym po
 //  cenie (force_overlay). Wartość RSI (0–100) pokazuje dashboard.
+//  FILTR DYWERGENCJI HTF (2h / 4h): wskaźnik śledzi ostatnią dywergencję RSI
+//  na dwóch wyższych interwałach. Gdy ostatnia jest niedźwiedzia (Bear /
+//  H.Bear), formacje bycze (Bull, H.Bull, 2 cyce dno) nie powstają — gdy
+//  bycza, nie powstają niedźwiedzie. Stan obu interwałów i aktywną blokadę
+//  pokazuje osobna tabelka po prawej stronie panelu.
+//
 //  Detekcje bez repaintu: pivoty potwierdzone (Pivot Right Bars), sygnały
-//  liczone po zamknięciu bara, brak request.security / lookahead.
+//  liczone po zamknięciu bara; request.security czyta wyłącznie ZAMKNIĘTE
+//  bary HTF (offset [1] + lookahead) — stan HTF nie repaintuje.
 //  To autorski wskaźnik inspirowany estetyką Cipher B — nie oficjalny produkt.
 //  max_bars_back ustawione świadomie: pivoty + max dystans + zapas.
 // ═════════════════════════════════════════════════════════════════════════════
@@ -52,6 +59,15 @@ extHard      = input.float(60.0, "Ekstremum twarde (±)", minval = 1.0, group = 
 // ── Grupa: Filtr Money Flow (NOWA) ───────────────────────────────────────────
 gFlt         = "Filtr Money Flow"
 mfFilterMode = input.string("Zgodny z MF", "Filtr kierunku dla formacji", options = ["Wyłączony", "Zgodny z MF", "Przeciwny do MF"], group = gFlt, tooltip = "Dotyczy dywergencji RSI (Regular/Hidden Bull i Bear) oraz formacji „2 cyce”.\n• Zgodny z MF: formacje bycze pojawiają się tylko, gdy Money Flow jest byczy (MF > strefa neutralna), a niedźwiedzie tylko przy niedźwiedzim MF.\n• Przeciwny do MF: odwrotnie — bycze przy niedźwiedzim MF (łapanie odwróceń).\n• Wyłączony: brak filtra.\nOcena stanu MF następuje w barze potwierdzenia formacji.")
+
+// ── Grupa: Filtr dywergencji HTF ─────────────────────────────────────────────
+gHtf         = "Filtr dywergencji HTF"
+useHtfFilter = input.bool(true, "Blokuj formacje przeciwne do dywergencji HTF", group = gHtf, tooltip = "Gdy OSTATNIA dywergencja RSI na aktywnym wyższym interwale jest niedźwiedzia (Bear / H.Bear), formacje bycze (Bull, H.Bull, 2 cyce dno) w ogóle nie powstają. Gdy bycza (Bull / H.Bull) — nie powstają formacje niedźwiedzie (Bear, H.Bear, 2 cyce szczyt). Wystarczy weto z JEDNEGO aktywnego interwału. Blokada działa na poziomie detekcji, więc alerty pozostają 1:1 z wykresem.")
+useHtfA      = input.bool(true, "TF A", inline = "h1", group = gHtf)
+tfA          = input.timeframe("120", "", inline = "h1", group = gHtf, tooltip = "Pierwszy wyższy interwał (domyślnie 2h). Slot działa tylko, gdy jest >= interwałowi wykresu.")
+useHtfB      = input.bool(true, "TF B", inline = "h2", group = gHtf)
+tfB          = input.timeframe("240", "", inline = "h2", group = gHtf, tooltip = "Drugi wyższy interwał (domyślnie 4h). Slot działa tylko, gdy jest >= interwałowi wykresu.")
+showHtfTable = input.bool(true, "Pokaż tabelkę dywergencji HTF", group = gHtf, tooltip = "Osobna tabelka po prawej stronie panelu: ostatnia dywergencja RSI na TF A i TF B oraz aktywna blokada (LONG / SHORT / brak).")
 
 // ── Grupa: RSI ───────────────────────────────────────────────────────────────
 gRsi   = "RSI"
@@ -176,12 +192,73 @@ float mf   = f_ma(mfCore, smoothLen, maTypeIn)
 float sig  = f_ma(mf, sigLen, maTypeIn)
 float hist = mf - sig
 
-// ── Stan MF i filtr kierunku ─────────────────────────────────────────────────
+// ── Stan MF ──────────────────────────────────────────────────────────────────
 // 1 = byk (MF > strefa neutralna), −1 = niedźwiedź, 0 = neutralny
 int mfState = mf > neutralZone ? 1 : mf < -neutralZone ? -1 : 0
-// Zgoda na formacje bycze / niedźwiedzie wg trybu filtra (dywergencje RSI + 2 cyce)
-bool allowBull = mfFilterMode == "Wyłączony" or (mfFilterMode == "Zgodny z MF" ? mfState == 1 : mfState == -1)
-bool allowBear = mfFilterMode == "Wyłączony" or (mfFilterMode == "Zgodny z MF" ? mfState == -1 : mfState == 1)
+
+// ── Dywergencje HTF: „ostatnia dywergencja RSI” na wyższych interwałach ──────
+// Funkcja wykonywana w KONTEKŚCIE wyższego interwału (request.security):
+// ten sam silnik pivotów co dla dywergencji RSI na wykresie (te same
+// parametry pivotów, min/max dystans i min. różnica RSI; bez filtra siły
+// i bez filtra MF). Zwraca kod OSTATNIEJ potwierdzonej dywergencji:
+//  1 = Regular Bull, 2 = Hidden Bull, −1 = Regular Bear, −2 = Hidden Bear,
+//  0 = jeszcze żadnej (kod trzymany w var → pamięta ostatnią z całej historii)
+f_htfDivCode() =>
+    float _rsiH = ta.rsi(rsiSrc, rsiLen)
+    float _ph   = ta.pivothigh(_rsiH, pivLeft, pivRight)
+    float _pl   = ta.pivotlow(_rsiH, pivLeft, pivRight)
+    int   _pb   = bar_index - pivRight
+    var int   _code = 0
+    var int   _plB  = na
+    var float _plV  = na
+    var float _plP  = na
+    var int   _phB  = na
+    var float _phV  = na
+    var float _phP  = na
+    if not na(_pl)
+        float _p = low[pivRight]
+        if not na(_plB)
+            int _d = _pb - _plB
+            if _d >= minDist and _d <= maxDist and math.abs(_pl - _plV) >= minRsiDiff
+                if _p < _plP and _pl > _plV
+                    _code := 1                          // Regular Bull
+                if _p > _plP and _pl < _plV
+                    _code := 2                          // Hidden Bull
+        _plB := _pb
+        _plV := _pl
+        _plP := _p
+    if not na(_ph)
+        float _p = high[pivRight]
+        if not na(_phB)
+            int _d = _pb - _phB
+            if _d >= minDist and _d <= maxDist and math.abs(_ph - _phV) >= minRsiDiff
+                if _p > _phP and _ph < _phV
+                    _code := -1                         // Regular Bear
+                if _p < _phP and _ph > _phV
+                    _code := -2                         // Hidden Bear
+        _phB := _pb
+        _phV := _ph
+        _phP := _p
+    _code
+
+// Odczyt bez repaintu: [1] + lookahead_on = stan z ostatniego ZAMKNIĘTEGO
+// bara HTF, dostępny od razu i niezmienny w trakcie bieżącego bara HTF
+int htfRawA = nz(request.security(syminfo.tickerid, tfA, f_htfDivCode()[1], lookahead = barmerge.lookahead_on), 0)
+int htfRawB = nz(request.security(syminfo.tickerid, tfB, f_htfDivCode()[1], lookahead = barmerge.lookahead_on), 0)
+// Slot ma sens tylko, gdy jego TF jest >= interwałowi wykresu
+bool tfAOk = timeframe.in_seconds(tfA) >= timeframe.in_seconds(timeframe.period)
+bool tfBOk = timeframe.in_seconds(tfB) >= timeframe.in_seconds(timeframe.period)
+int htfCodeA = useHtfA and tfAOk ? htfRawA : 0
+int htfCodeB = useHtfB and tfBOk ? htfRawB : 0
+// Weto HTF: ostatnia dywergencja niedźwiedzia → blokada formacji byczych;
+// bycza → blokada niedźwiedzich (wystarczy jedno weto z aktywnego TF)
+bool htfBearVeto = useHtfFilter and (htfCodeA < 0 or htfCodeB < 0)
+bool htfBullVeto = useHtfFilter and (htfCodeA > 0 or htfCodeB > 0)
+
+// ── Filtry kierunku (MF + dywergencja HTF) ───────────────────────────────────
+// Zgoda na formacje bycze / niedźwiedzie (dywergencje RSI + 2 cyce)
+bool allowBull = (mfFilterMode == "Wyłączony" or (mfFilterMode == "Zgodny z MF" ? mfState == 1 : mfState == -1)) and not htfBearVeto
+bool allowBear = (mfFilterMode == "Wyłączony" or (mfFilterMode == "Zgodny z MF" ? mfState == -1 : mfState == 1)) and not htfBullVeto
 
 // ── Pivoty (wartość != na tylko w barze POTWIERDZENIA pivota) ────────────────
 rsiPH   = ta.pivothigh(rsiVal, pivLeft, pivRight)   // pivoty na RSI (dywergencje RSI)
