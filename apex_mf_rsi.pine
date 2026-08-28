@@ -2,7 +2,7 @@
 // ═════════════════════════════════════════════════════════════════════════════
 //  APEX MONEY FLOW + RSI DIVERGENCE  (Pine Script v6)
 //  ───────────────────────────────────────────────────────────────────────────
-//  Połączenie dwóch wskaźników w jeden panel:
+//  Połączenie dwóch wskaźników w jeden skrypt:
 //   • Money Flow w stylu Cipher B — gruba fala wokół 0 (−100…100), gradientowe
 //     wypełnienie, linia sygnału, histogram momentum, kropki zero-cross
 //     i extreme-reversal, dywergencje MF vs cena, dashboard
